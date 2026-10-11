@@ -102,13 +102,26 @@ read-only Buzz CLI check inside the existing developer service can be run with:
 
 ```bash
 run_check buzz docker compose --env-file "$runtime_env" \
-  -f agents/compose.yaml exec -T developer-a buzz channels get \
-  --channel e04d48c5-f100-4e75-9362-aaac11094227
+  -f agents/compose.yaml exec -T developer-a sh -eu -c '
+  export BUZZ_PRIVATE_KEY="$(cat /run/agent/credentials/buzz-private-key)"
+  if [ -r /run/agent/credentials/buzz-auth-tag ]; then
+    export BUZZ_AUTH_TAG="$(cat /run/agent/credentials/buzz-auth-tag)"
+  fi
+  if [ -r /run/agent/credentials/buzz-api-token ]; then
+    export BUZZ_API_TOKEN="$(cat /run/agent/credentials/buzz-api-token)"
+  fi
+  exec buzz channels get --channel "$1"
+' sh e04d48c5-f100-4e75-9362-aaac11094227
 ```
 
 Expected: successful channel response. If no existing service is available, mark
 this check pending; do not start one. Ask Developer A in the same Buzz thread to
 run these native MCP calls and report only identity/repository/task status:
+
+The exec shell loads authentication from the existing mounted files because it does
+not inherit exports made by the running entrypoint. Do not use shell tracing or
+print these variables. This command only reads credentials through the runtime
+authentication flow and does not modify them.
 
 ```text
 mcp__kaneo__get_task({"taskId":"xbb7u0bj8sc1p30ewc6709yb"})

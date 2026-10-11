@@ -281,7 +281,7 @@
       "target": "agents/scripts/provision-agent-repository.sh",
       "sourceBlob": "71bbf6cc800183bbb4234ed53592fed2d52e43c6",
       "mode": "100755",
-      "targetSha256": "d1b7828bd12e63a05fd758b6371d5d4bdfe7fb975a821b73e62ab89362810b5b",
+      "targetSha256": "49ddf1bdbd5049a266b7ea70525693f79ce7f14527d2d050261a52f658bbfc8c",
       "changed": true
     },
     {
@@ -337,8 +337,8 @@
       "target": "agents/scripts/test-provision-runtime.sh",
       "sourceBlob": "48494fb6d78974714125aea59b4f4fd9ac3aaa37",
       "mode": "100755",
-      "targetSha256": "9adc65595af9ed17e672c8c7b44daf1fdbc14c27e52b6be34ea2ef043179014d",
-      "changed": false
+      "targetSha256": "7b2525d887e2cdc9a09ba4c551fbab504837f0169efad6d353b2e231260c5de5",
+      "changed": true
     },
     {
       "source": "agent-orchestration/github-apps/README.md",

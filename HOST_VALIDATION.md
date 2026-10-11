@@ -103,13 +103,25 @@ provisioning하거나 재시작하지 않습니다. `config --quiet`는 치환�
 
 ```bash
 run_check buzz docker compose --env-file "$runtime_env" \
-  -f agents/compose.yaml exec -T developer-a buzz channels get \
-  --channel e04d48c5-f100-4e75-9362-aaac11094227
+  -f agents/compose.yaml exec -T developer-a sh -eu -c '
+  export BUZZ_PRIVATE_KEY="$(cat /run/agent/credentials/buzz-private-key)"
+  if [ -r /run/agent/credentials/buzz-auth-tag ]; then
+    export BUZZ_AUTH_TAG="$(cat /run/agent/credentials/buzz-auth-tag)"
+  fi
+  if [ -r /run/agent/credentials/buzz-api-token ]; then
+    export BUZZ_API_TOKEN="$(cat /run/agent/credentials/buzz-api-token)"
+  fi
+  exec buzz channels get --channel "$1"
+' sh e04d48c5-f100-4e75-9362-aaac11094227
 ```
 
 채널 조회 성공 응답을 기대합니다. 기존 서비스가 없으면 검사를 대기로 기록하고
 새 서비스를 시작하지 않습니다. 같은 Buzz 스레드에서 Developer A에게 다음 native
 MCP 호출을 실행하고 identity/repository/task 상태만 보고하도록 요청합니다.
+
+exec 셸은 실행 중인 entrypoint가 export한 변수를 상속하지 않으므로 기존 마운트
+파일에서 인증을 로드합니다. 셸 추적(set -x)을 켜거나 변수 값을 출력하지 않습니다.
+이 명령은 런타임 인증 절차로 credential을 읽기만 하며 변경하지 않습니다.
 
 ```text
 mcp__kaneo__get_task({"taskId":"xbb7u0bj8sc1p30ewc6709yb"})

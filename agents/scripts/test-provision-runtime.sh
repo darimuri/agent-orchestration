@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+umask 077
 
 root_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 host_uid="$(id -u)"
@@ -32,6 +33,11 @@ git -C "${source_repository}" add README.md
 git -C "${source_repository}" \
   -c user.name=fixture -c user.email=fixture@example.test \
   commit -m fixture >/dev/null
+
+source_object="$(git -C "${source_repository}" rev-parse HEAD)"
+source_object_path="${source_repository}/.git/objects/${source_object:0:2}/${source_object:2}"
+source_object_owner="$(stat -c '%u:%g' "${source_object_path}")"
+source_object_inode="$(stat -c '%d:%i' "${source_object_path}")"
 
 expected_gateway_image="$(sed -n 's/^GITHUB_GATEWAY_IMAGE=//p' "${root_dir}/.env.example")"
 env_file="${scratch_dir}/runtime.env"
@@ -120,7 +126,12 @@ PROVISION_RUNTIME_TEST_MODE="${PROVISION_RUNTIME_TEST_MODE:-0}" \
   "${root_dir}/scripts/provision-agent-repository.sh" \
   test-org/test-repo main "${env_file}" >/dev/null
 
+test "$(stat -c '%u:%g' "${source_object_path}")" = "${source_object_owner}"
+git -C "${source_repository}" cat-file -e "${source_object}^{commit}"
+
 for workspace in dispatcher developer reviewer; do
+  clone_object_path="${scratch_dir}/agent-runtime/${workspace}/workspace/test-org/test-repo/.git/objects/${source_object:0:2}/${source_object:2}"
+  test "$(as_root stat -c '%d:%i' "${clone_object_path}")" != "${source_object_inode}"
   test ! -e "${scratch_dir}/agent-runtime/${workspace}/workspace/.git"
   test -d "${scratch_dir}/agent-runtime/${workspace}/workspace/test-org/test-repo/.git"
   test "$(stat -c '%u' "${scratch_dir}/agent-runtime/${workspace}/workspace")" = 10001

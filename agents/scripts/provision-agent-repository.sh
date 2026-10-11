@@ -147,7 +147,8 @@ provision_clone() {
     return
   fi
 
-  git clone --branch "${requested_ref}" "${repository_url}" "${staging}"
+  # Keep local source objects independent before changing clone ownership.
+  git clone --no-hardlinks --branch "${requested_ref}" "${repository_url}" "${staging}"
   as_root mv "${staging}" "${destination}"
   as_root chown -R "${agent_uid}:${agent_uid}" "${destination}"
   printf 'Provisioned %s clone: %s\n' "${agent_name}" "${destination}"
