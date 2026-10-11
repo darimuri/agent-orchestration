@@ -1,0 +1,13 @@
+{
+  "kaneo": {
+    "type": "stdio",
+    "command": "kaneo-mcp-safe-proxy",
+    "args": [],
+    "env": ["KANEO_API_URL"]
+  },
+  "github_gateway": {
+    "type": "http",
+    "urlEnv": "GITHUB_GATEWAY_MCP_URL",
+    "bearerTokenEnv": "GITHUB_GATEWAY_AGENT_TOKEN"
+  }
+}

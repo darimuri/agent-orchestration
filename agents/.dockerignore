@@ -1,0 +1,9 @@
+.env
+credentials/
+prompts/
+state/
+workspaces/
+**/*.secret
+**/auth.json
+**/credentials.json
+.smoke.*

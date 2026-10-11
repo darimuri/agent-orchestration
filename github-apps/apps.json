@@ -1,0 +1,87 @@
+[
+  {
+    "name": "darimuri-agent-developer-a",
+    "bootstrap": true,
+    "repository_selection": "all",
+    "description": "Creates agent feature branches and pull requests; never reviews or merges.",
+    "url": "https://github.com/darimuri/agent-orchestration",
+    "public": false,
+    "default_permissions": {
+      "contents": "write",
+      "issues": "write",
+      "pull_requests": "write"
+    },
+    "default_events": []
+  },
+  {
+    "name": "darimuri-agent-reviewer-a",
+    "bootstrap": true,
+    "repository_selection": "all",
+    "description": "Publishes agent review comments and SHA-bound check runs; cannot push source.",
+    "url": "https://github.com/darimuri/agent-orchestration",
+    "public": false,
+    "default_permissions": {
+      "actions": "read",
+      "checks": "write",
+      "contents": "read",
+      "issues": "write",
+      "pull_requests": "write"
+    },
+    "default_events": []
+  },
+  {
+    "name": "darimuri-agent-control-a",
+    "bootstrap": true,
+    "repository_selection": "all",
+    "description": "Lets the dispatcher manage job-scoped issues without writing code.",
+    "url": "https://github.com/darimuri/agent-orchestration",
+    "public": false,
+    "default_permissions": {
+      "contents": "read",
+      "issues": "write"
+    },
+    "default_events": []
+  },
+  {
+    "name": "darimuri-forge-publisher-a",
+    "bootstrap": false,
+    "repository_selection": "all",
+    "description": "Publishes validated patch bundles as feature branches and pull requests.",
+    "url": "https://github.com/darimuri/agent-orchestration",
+    "public": false,
+    "default_permissions": {
+      "contents": "write",
+      "pull_requests": "write"
+    },
+    "default_events": []
+  },
+  {
+    "name": "darimuri-merge-broker-a",
+    "bootstrap": false,
+    "repository_selection": "all",
+    "description": "Merges only the current head after external policy verification.",
+    "url": "https://github.com/darimuri/agent-orchestration",
+    "public": false,
+    "default_permissions": {
+      "actions": "read",
+      "checks": "read",
+      "contents": "write",
+      "pull_requests": "write"
+    },
+    "default_events": []
+  },
+  {
+    "name": "darimuri-deploy-broker-a",
+    "bootstrap": false,
+    "repository_selection": "all",
+    "description": "Creates approved deployments for immutable artifacts; never writes source.",
+    "url": "https://github.com/darimuri/agent-orchestration",
+    "public": false,
+    "default_permissions": {
+      "actions": "read",
+      "contents": "read",
+      "deployments": "write"
+    },
+    "default_events": []
+  }
+]
