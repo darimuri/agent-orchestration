@@ -140,7 +140,7 @@ provision_clone() {
   if as_root test -e "${destination}"; then
     as_root test -d "${destination}/.git" \
       || die "${agent_name} repository path exists but is not a full clone: ${destination}"
-    origin="$(git -c safe.directory="${destination}" -C "${destination}" remote get-url origin)"
+    origin="$(as_root git -c safe.directory="${destination}" -C "${destination}" remote get-url origin)"
     [[ "${origin}" == "${repository_url}" ]] \
       || die "${agent_name} repository origin is ${origin}, expected ${repository_url}"
     printf 'Preserving %s clone: %s\n' "${agent_name}" "${destination}"
