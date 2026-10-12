@@ -132,12 +132,12 @@ git -C "${source_repository}" cat-file -e "${source_object}^{commit}"
 for workspace in dispatcher developer reviewer; do
   clone_object_path="${scratch_dir}/agent-runtime/${workspace}/workspace/test-org/test-repo/.git/objects/${source_object:0:2}/${source_object:2}"
   test "$(as_root stat -c '%d:%i' "${clone_object_path}")" != "${source_object_inode}"
-  test ! -e "${scratch_dir}/agent-runtime/${workspace}/workspace/.git"
-  test -d "${scratch_dir}/agent-runtime/${workspace}/workspace/test-org/test-repo/.git"
-  test "$(stat -c '%u' "${scratch_dir}/agent-runtime/${workspace}/workspace")" = 10001
-  test "$(stat -c '%u' "${scratch_dir}/agent-runtime/${workspace}/workspace/test-org/test-repo")" = 10001
-  test "$(stat -c '%u' "${scratch_dir}/agent-runtime/${workspace}/credentials")" = 10001
-  test "$(stat -c '%a' "${scratch_dir}/agent-runtime/${workspace}/credentials")" = 700
+  as_root test ! -e "${scratch_dir}/agent-runtime/${workspace}/workspace/.git"
+  as_root test -d "${scratch_dir}/agent-runtime/${workspace}/workspace/test-org/test-repo/.git"
+  test "$(as_root stat -c '%u' "${scratch_dir}/agent-runtime/${workspace}/workspace")" = 10001
+  test "$(as_root stat -c '%u' "${scratch_dir}/agent-runtime/${workspace}/workspace/test-org/test-repo")" = 10001
+  test "$(as_root stat -c '%u' "${scratch_dir}/agent-runtime/${workspace}/credentials")" = 10001
+  test "$(as_root stat -c '%a' "${scratch_dir}/agent-runtime/${workspace}/credentials")" = 700
 done
 if PROVISION_RUNTIME_TEST_MODE="${PROVISION_RUNTIME_TEST_MODE:-0}" \
   "${root_dir}/scripts/provision-agent-repository.sh" \
