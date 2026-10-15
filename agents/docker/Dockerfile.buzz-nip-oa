@@ -1,0 +1,33 @@
+ARG RUST_IMAGE=docker.io/library/rust:1.95.0-bookworm@sha256:6258907abe69656e41cd992e0b705cdcfabcbbe3db374f92ed2d47121282d4a1
+ARG RUNTIME_IMAGE=docker.io/library/debian:bookworm-slim@sha256:7c7b2c966bc9ee8cedfeef67e0e279108992c77681fa595db4a9d65c06ccc587
+ARG BUZZ_SOURCE_COMMIT=c8f73213089cbd5a0f1e675d3193558280d46e10
+
+FROM ${RUST_IMAGE} AS build
+
+ARG BUZZ_SOURCE_REPOSITORY=https://github.com/block/buzz.git
+ARG BUZZ_SOURCE_COMMIT
+
+RUN git init /src/buzz \
+    && git -C /src/buzz remote add origin "${BUZZ_SOURCE_REPOSITORY}" \
+    && git -C /src/buzz fetch --depth 1 origin "${BUZZ_SOURCE_COMMIT}" \
+    && git -C /src/buzz checkout --detach FETCH_HEAD \
+    && test "$(git -C /src/buzz rev-parse HEAD)" = "${BUZZ_SOURCE_COMMIT}"
+
+COPY docker/compute-buzz-auth-tag.rs \
+    /src/buzz/crates/buzz-sdk/examples/compute_auth_tag_file.rs
+
+WORKDIR /src/buzz
+RUN cargo build --locked --release --package buzz-sdk \
+    --example compute_auth_tag_file
+
+FROM ${RUNTIME_IMAGE}
+
+ARG BUZZ_SOURCE_COMMIT
+LABEL org.opencontainers.image.source="https://github.com/block/buzz" \
+      org.opencontainers.image.revision="${BUZZ_SOURCE_COMMIT}"
+
+COPY --from=build \
+    /src/buzz/target/release/examples/compute_auth_tag_file \
+    /usr/local/bin/compute-buzz-auth-tag
+
+ENTRYPOINT ["/usr/local/bin/compute-buzz-auth-tag"]

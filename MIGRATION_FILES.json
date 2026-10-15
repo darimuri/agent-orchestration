@@ -1,0 +1,384 @@
+{
+  "sourceRepository": "darimuri/k8s-test",
+  "sourceCommit": "619f99df92aa7fb707635013b900b6bca444bd9f",
+  "targetRepository": "darimuri/agent-orchestration",
+  "targetBase": "9a7658010a3068642d67e4ac4848416d8f404347",
+  "files": [
+    {
+      "source": "agent-orchestration/ARCHITECTURE.md",
+      "target": "ARCHITECTURE.md",
+      "sourceBlob": "720e129c982b1d1ece63c96abf56314f8b1cf894",
+      "mode": "100644",
+      "targetSha256": "91f68a73d6f7f4d326a9bb06494df550115bb6916dd669c57dcc3a502cbc6532",
+      "changed": false
+    },
+    {
+      "source": "agent-orchestration/BUZZ-AGENT-PROVISIONING.md",
+      "target": "BUZZ-AGENT-PROVISIONING.md",
+      "sourceBlob": "2ec2682221a58fffdbbd1b2eaa90715871b42123",
+      "mode": "100644",
+      "targetSha256": "381cf2a0922ef6e5643825f4eaed06ee706168aa349867ea4eb4166d21961166",
+      "changed": true
+    },
+    {
+      "source": "agent-orchestration/GITHUB-APP-BOUNDARIES.md",
+      "target": "GITHUB-APP-BOUNDARIES.md",
+      "sourceBlob": "4084a53288fc912cebb1bd1feb3ff4602ba2e533",
+      "mode": "100644",
+      "targetSha256": "d2b127cc09ebcf08d89b7649ca1212768968f393fd2270e29dc2166ec1be42e4",
+      "changed": false
+    },
+    {
+      "source": "agent-orchestration/GITHUB-FREE-ORG.md",
+      "target": "GITHUB-FREE-ORG.md",
+      "sourceBlob": "7214ceba0255cbc085f1be0910970d8a7fa1c714",
+      "mode": "100644",
+      "targetSha256": "b8d56a31604ece7d35b19925b04e187a292a4ec550b65ba4aa67c18a007d36a5",
+      "changed": false
+    },
+    {
+      "source": "agent-orchestration/KANEO-MCP-SETUP.md",
+      "target": "KANEO-MCP-SETUP.md",
+      "sourceBlob": "1f0c64144e9d85e94dc392e21cebb5c82ecaad90",
+      "mode": "100644",
+      "targetSha256": "428732c18e9e97ee7a374aa000f060fc6347c478c7b854249290622587bc7857",
+      "changed": false
+    },
+    {
+      "source": "agent-orchestration/KANEO-VS-GITHUB-PROJECTS.md",
+      "target": "KANEO-VS-GITHUB-PROJECTS.md",
+      "sourceBlob": "a067903ccc4e2327e2ef116b24d878f47ea64f1d",
+      "mode": "100644",
+      "targetSha256": "078055cdbdb79f42fcfb30edf37db0bfdc4f4d06d4f5ddcabea992e02fd3cf8b",
+      "changed": false
+    },
+    {
+      "source": "agent-orchestration/PLAN.md",
+      "target": "PLAN.md",
+      "sourceBlob": "b0a4f55e42325a9636e85bf77784a6fe3b68881d",
+      "mode": "100644",
+      "targetSha256": "2a2b7f1d891ee041d229b34095711e98f0f1c2df7d03def8cd66ebaeddf22ee1",
+      "changed": true
+    },
+    {
+      "source": "agent-orchestration/README.md",
+      "target": "README.md",
+      "sourceBlob": "8227b58dba70d18b4221b8d63ce364c66403e45d",
+      "mode": "100644",
+      "targetSha256": "2892d6524dcf891d4a87f81733919afb07fda2a8a03ed10933588da0fcc45935",
+      "changed": true
+    },
+    {
+      "source": "agent-orchestration/RESEARCH.md",
+      "target": "RESEARCH.md",
+      "sourceBlob": "7538b4f981ea660cd10cbb944efcc8af32e7785c",
+      "mode": "100644",
+      "targetSha256": "08f045501d1a96a2048a92915efa69ecb59a0b202eb0bb6ffb76b47b6c4b74e5",
+      "changed": false
+    },
+    {
+      "source": "agent-orchestration/SUBSCRIPTION-OAUTH-SANDBOX.md",
+      "target": "SUBSCRIPTION-OAUTH-SANDBOX.md",
+      "sourceBlob": "96e4ed624be34714e0c0c7a77b0511a8cca0450b",
+      "mode": "100644",
+      "targetSha256": "f3768ca01ca886b8824c374297d52d188c37bef1e2ddfb9a9fa5d0ae549196dc",
+      "changed": false
+    },
+    {
+      "source": "agent-orchestration/WORKLOG.md",
+      "target": "WORKLOG.md",
+      "sourceBlob": "0622dfc32c00f1501e34540f0f96635f2a618d9d",
+      "mode": "100644",
+      "targetSha256": "e944605aaeafcdaccb9a7b2a6877c2c138bedd82ea9e7c606f9e987e3b17224f",
+      "changed": false
+    },
+    {
+      "source": "agent-orchestration/adr/0001-github-primary.md",
+      "target": "adr/0001-github-primary.md",
+      "sourceBlob": "aaf19ad475cde7c88c5bf427ff14b27218b9135d",
+      "mode": "100644",
+      "targetSha256": "c1c7eb273a231f7fb82e127a2446568e5a2334be0413461b2bbb6e1f2e9dbd4b",
+      "changed": false
+    },
+    {
+      "source": "agent-orchestration/adr/0002-free-org-degraded-mode.md",
+      "target": "adr/0002-free-org-degraded-mode.md",
+      "sourceBlob": "df0879521f6d209b654b6b726a23ec7aada91c1a",
+      "mode": "100644",
+      "targetSha256": "2b9fbb5b60160115b75cd6044fbbc391965d7954a1ec950351c4aad1f50771a8",
+      "changed": false
+    },
+    {
+      "source": "agent-orchestration/agents/.dockerignore",
+      "target": "agents/.dockerignore",
+      "sourceBlob": "730dbc848624400cef5156b4e860e5c553826e77",
+      "mode": "100644",
+      "targetSha256": "9182b5adf2626741bb3f925ed1a14f9ee3dea5cb3f7de13317d914c73447b46e",
+      "changed": false
+    },
+    {
+      "source": "agent-orchestration/agents/.env.example",
+      "target": "agents/.env.example",
+      "sourceBlob": "306d24f903c83da8f83ba55c0437264d831051eb",
+      "mode": "100644",
+      "targetSha256": "5d9f5bc608c395d19ea06073193bde481512c4d0f16c6c9b3370096804d87fa5",
+      "changed": false
+    },
+    {
+      "source": "agent-orchestration/agents/.gitignore",
+      "target": "agents/.gitignore",
+      "sourceBlob": "f5ba4c0eff42c7e012be30b020cd09fe8f32709e",
+      "mode": "100644",
+      "targetSha256": "de98f5d9e189cc49833c12cbf3a99bf8f15b33f2b6191b717fac9efe5d3d216f",
+      "changed": false
+    },
+    {
+      "source": "agent-orchestration/agents/README.md",
+      "target": "agents/README.md",
+      "sourceBlob": "3070dec88b6344cfd7bf32ce019ccefaf62bf3bf",
+      "mode": "100644",
+      "targetSha256": "3e15883d4f4faf2ff34fb944d5614a2edccd46e9d03facb93dd9b867bc5fa9d2",
+      "changed": true
+    },
+    {
+      "source": "agent-orchestration/agents/compose.yaml",
+      "target": "agents/compose.yaml",
+      "sourceBlob": "9134951a3adddaa7ab688bcbd5be49b559d8fafe",
+      "mode": "100644",
+      "targetSha256": "2cd8fe7a39b0b8858acc825593aeb3c33cd86665fab83f395f9218da09e8b4d2",
+      "changed": false
+    },
+    {
+      "source": "agent-orchestration/agents/docker/Dockerfile.buzz-nip-oa",
+      "target": "agents/docker/Dockerfile.buzz-nip-oa",
+      "sourceBlob": "ce8963ff0f3ed83559812b4c6a3ea585fe86b180",
+      "mode": "100644",
+      "targetSha256": "6720c711407c7e43f58e730d4a1a909affa2b0ceefaf8b50c48aae19a7983a06",
+      "changed": false
+    },
+    {
+      "source": "agent-orchestration/agents/docker/Dockerfile.claude",
+      "target": "agents/docker/Dockerfile.claude",
+      "sourceBlob": "725c58229780279524ccb9ebc4c8c3633350ebbc",
+      "mode": "100644",
+      "targetSha256": "54077326a9c2899377e4e844b259cd216223f62ef7be7b14631f3142990fa05a",
+      "changed": false
+    },
+    {
+      "source": "agent-orchestration/agents/docker/Dockerfile.codex",
+      "target": "agents/docker/Dockerfile.codex",
+      "sourceBlob": "6e57e9921396967ed68b3d2047cb360848ab206d",
+      "mode": "100644",
+      "targetSha256": "3c930d3e55f7171680b96843c291b6787b21b6c4accc93ff1ba82fdd8ef9aaeb",
+      "changed": false
+    },
+    {
+      "source": "agent-orchestration/agents/docker/agent-entrypoint.sh",
+      "target": "agents/docker/agent-entrypoint.sh",
+      "sourceBlob": "c4968c6b21edcb3ede4f9363ce34ed0cd91aa844",
+      "mode": "100755",
+      "targetSha256": "511f982c1d011984cdc8392142c27b52f7778b2b41adeff13f066ccaaa500e8c",
+      "changed": false
+    },
+    {
+      "source": "agent-orchestration/agents/docker/compute-buzz-auth-tag.rs",
+      "target": "agents/docker/compute-buzz-auth-tag.rs",
+      "sourceBlob": "cfa9e6daf14333138304f1beba2830f470087274",
+      "mode": "100644",
+      "targetSha256": "c9dc239c2394ba641983175f96216ea096782f87044cb9b9240b8b4ee95b73f3",
+      "changed": false
+    },
+    {
+      "source": "agent-orchestration/agents/docker/generate-mcp-config.mjs",
+      "target": "agents/docker/generate-mcp-config.mjs",
+      "sourceBlob": "4cebf5f802a5f5c39e7adb7dd0135f832dafe541",
+      "mode": "100644",
+      "targetSha256": "9a62bfbfb2a0c886a7970f9df25216f9791c5576ce3fb3b5aa32c9cd3272e47d",
+      "changed": false
+    },
+    {
+      "source": "agent-orchestration/agents/docker/kaneo-mcp-safe-proxy.mjs",
+      "target": "agents/docker/kaneo-mcp-safe-proxy.mjs",
+      "sourceBlob": "4a4f7f0af6b8e6bd254d8ec811b1ff5ae976d67f",
+      "mode": "100755",
+      "targetSha256": "52332323d667fd2220bd5e464fe0a9126035018880f50224f8fae9ba5f6647f4",
+      "changed": false
+    },
+    {
+      "source": "agent-orchestration/agents/docker/kaneo-mcp-safe-proxy.test.mjs",
+      "target": "agents/docker/kaneo-mcp-safe-proxy.test.mjs",
+      "sourceBlob": "e70a5349c1ca3686a5cb6332261dfb7cb7a05223",
+      "mode": "100644",
+      "targetSha256": "f63f08ea62d12b668e6bb22d54df79ef9e9ed942c1b6347604364bc3f0ae874c",
+      "changed": false
+    },
+    {
+      "source": "agent-orchestration/agents/mcp/servers.json",
+      "target": "agents/mcp/servers.json",
+      "sourceBlob": "55d24e9dc4ac48823692eef73e9554891fb7e9c0",
+      "mode": "100644",
+      "targetSha256": "99a904efc4f149651c0598452588194a9a464e38a023ff4828655d33b7efbd19",
+      "changed": false
+    },
+    {
+      "source": "agent-orchestration/agents/prepare-agents.md",
+      "target": "agents/prepare-agents.md",
+      "sourceBlob": "35161d5f63edc28c4eec403d3c05a1bcec2ca7ca",
+      "mode": "100644",
+      "targetSha256": "5b720332d92a455f77a3ea71d01411a8711ef6843fd41231c8e979eecad85edc",
+      "changed": true
+    },
+    {
+      "source": "agent-orchestration/agents/prompts/COMMON.md",
+      "target": "agents/prompts/COMMON.md",
+      "sourceBlob": "281a81504bf4cc3112f77c413a156d02081d3184",
+      "mode": "100644",
+      "targetSha256": "1e9fcd8ae91baa4bc4f9724e31baa286d35401e1bd0c68bfa13f75a06ff1a1fa",
+      "changed": false
+    },
+    {
+      "source": "agent-orchestration/agents/prompts/DEVELOPER.md",
+      "target": "agents/prompts/DEVELOPER.md",
+      "sourceBlob": "11fe5f4bb436a715871d47d0b85f49b5fdcc706c",
+      "mode": "100644",
+      "targetSha256": "33ea32aeb7627127496d5ff3764e3b6193c0b74e633accc301e70ad4ffd36c8c",
+      "changed": false
+    },
+    {
+      "source": "agent-orchestration/agents/prompts/DISPATCHER_PLANNER.md",
+      "target": "agents/prompts/DISPATCHER_PLANNER.md",
+      "sourceBlob": "2b49789b120a56b9a87cefa2e19905c4f707009e",
+      "mode": "100644",
+      "targetSha256": "172310e60fc96f083d3cb64318834bea25788569d056861af0796e6c237db55b",
+      "changed": false
+    },
+    {
+      "source": "agent-orchestration/agents/prompts/REVIEWER.md",
+      "target": "agents/prompts/REVIEWER.md",
+      "sourceBlob": "b2153fe7d95d9725c9d8fe44e74be5643d110409",
+      "mode": "100644",
+      "targetSha256": "e06a551c9e09b871d808ad30ccd948966eaab6d719b3fddfdf4d383f9c74047d",
+      "changed": false
+    },
+    {
+      "source": "agent-orchestration/agents/scripts/build-and-smoke.sh",
+      "target": "agents/scripts/build-and-smoke.sh",
+      "sourceBlob": "b38189533ef405236fd332006946a655ba199581",
+      "mode": "100755",
+      "targetSha256": "76e359bf2d19f4838370083d194a3d90ce3e9b32897bc576c851621651796064",
+      "changed": false
+    },
+    {
+      "source": "agent-orchestration/agents/scripts/preflight.sh",
+      "target": "agents/scripts/preflight.sh",
+      "sourceBlob": "c3976e4a5b8b065c6652bb427940dda8a4075459",
+      "mode": "100755",
+      "targetSha256": "76a7d654cb18d429135e2f5e41e8942b5d512b9b80825f3bc3fe5c4ce840bba7",
+      "changed": false
+    },
+    {
+      "source": "agent-orchestration/agents/scripts/provision-agent-repository.sh",
+      "target": "agents/scripts/provision-agent-repository.sh",
+      "sourceBlob": "71bbf6cc800183bbb4234ed53592fed2d52e43c6",
+      "mode": "100755",
+      "targetSha256": "164796e3c336197e466a959f685ad1fbdc7039d27fe18f59daaa8a038051adcb",
+      "changed": true
+    },
+    {
+      "source": "agent-orchestration/agents/scripts/provision-buzz-agent-identity.sh",
+      "target": "agents/scripts/provision-buzz-agent-identity.sh",
+      "sourceBlob": "e0782513d2c0acac9ee2c5521bbf35352a69a273",
+      "mode": "100755",
+      "targetSha256": "16c2fb53284ee23502c3cf1ba85c90e997259a96bc11ea0d76953254421baf87",
+      "changed": false
+    },
+    {
+      "source": "agent-orchestration/agents/scripts/provision-gateway-agent.mjs",
+      "target": "agents/scripts/provision-gateway-agent.mjs",
+      "sourceBlob": "431309ef5108042e2bb135677094155090566cd3",
+      "mode": "100644",
+      "targetSha256": "52e95d6865098a520b0a62a6ae6549d41ccb0f937c236d0f8857d992b6ee53bd",
+      "changed": false
+    },
+    {
+      "source": "agent-orchestration/agents/scripts/provision-kaneo-credential.sh",
+      "target": "agents/scripts/provision-kaneo-credential.sh",
+      "sourceBlob": "139fd52e29f11c8cc4bc74b3d7b39edc3634e590",
+      "mode": "100755",
+      "targetSha256": "7c482d1cbac21c29070134ee22ce1d95c43ea9dddff6576ff89ec7448903c61c",
+      "changed": false
+    },
+    {
+      "source": "agent-orchestration/agents/scripts/provision-runtime.sh",
+      "target": "agents/scripts/provision-runtime.sh",
+      "sourceBlob": "2b7c3c86bf2bbac892fa2b95896b52fe8ca71137",
+      "mode": "100755",
+      "targetSha256": "1cf3a5de868f00a2cfc8bbbea11b2ca1afd10558a5e03b2ee7b6eafcf84bad02",
+      "changed": true
+    },
+    {
+      "source": "agent-orchestration/agents/scripts/smoke.sh",
+      "target": "agents/scripts/smoke.sh",
+      "sourceBlob": "b42124b52326321db4af8fdd7b996fcf009ad141",
+      "mode": "100755",
+      "targetSha256": "d72110981c05fa9392cf1f0560805092cab9d7f29f06b5bc3afa4aa6f8f2df7a",
+      "changed": false
+    },
+    {
+      "source": "agent-orchestration/agents/scripts/test-provision-gateway-agent.sh",
+      "target": "agents/scripts/test-provision-gateway-agent.sh",
+      "sourceBlob": "6b59a69aef3d22ae57ca5492f632a76098f0000e",
+      "mode": "100755",
+      "targetSha256": "63ad73b04a16b5278009e3e1bd8e8023af73a741b91f1e3f5bc9f957ce2b35a5",
+      "changed": false
+    },
+    {
+      "source": "agent-orchestration/agents/scripts/test-provision-runtime.sh",
+      "target": "agents/scripts/test-provision-runtime.sh",
+      "sourceBlob": "48494fb6d78974714125aea59b4f4fd9ac3aaa37",
+      "mode": "100755",
+      "targetSha256": "f162c4a3efe2ee5ba61419e5f00ebc0c3bc234e17fbef794bbd6462b4d6ba6a5",
+      "changed": true
+    },
+    {
+      "source": "agent-orchestration/github-apps/README.md",
+      "target": "github-apps/README.md",
+      "sourceBlob": "3908cd09243e666cecae4cb6182f607fd2a2a216",
+      "mode": "100644",
+      "targetSha256": "71eda59fa050917484aff95ca6fc238caba4739eceb33abebd6088b01da98fa1",
+      "changed": false
+    },
+    {
+      "source": "agent-orchestration/github-apps/apps.json",
+      "target": "github-apps/apps.json",
+      "sourceBlob": "c062e8051ac32c21f59b894189bf9080bf31fcc8",
+      "mode": "100644",
+      "targetSha256": "0d5b903dff82657b5d1d0a569bfc5134630716e131f4a1715d68459f321f59df",
+      "changed": true
+    },
+    {
+      "source": "agent-orchestration/github-apps/create-apps.sh",
+      "target": "github-apps/create-apps.sh",
+      "sourceBlob": "96ef8488c54b702b1f0a865636bc0f6d84cdf1ff",
+      "mode": "100755",
+      "targetSha256": "48d6f97476363c0c74f18bf79def2d850ba60d0fa90e3f5eb6d1e854afa86bde",
+      "changed": false
+    },
+    {
+      "source": "agent-orchestration/github-apps/manifest_callback.py",
+      "target": "github-apps/manifest_callback.py",
+      "sourceBlob": "c97b1051a7b8b64d76f274b1eaa2d26f343b465d",
+      "mode": "100755",
+      "targetSha256": "06f10085e31678a27c39d53e202182dfd576f47fba971dad8c2ba7710819d77e",
+      "changed": false
+    },
+    {
+      "source": "agent-orchestration/github-apps/test-create-apps.sh",
+      "target": "github-apps/test-create-apps.sh",
+      "sourceBlob": "07322df02215d059f1ed108733ca3b8711ea6d73",
+      "mode": "100755",
+      "targetSha256": "04a486d29384ffffff373a50293d839b57f3269aedfbf3401a75d47df7be01c9",
+      "changed": false
+    }
+  ]
+}

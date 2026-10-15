@@ -1,0 +1,170 @@
+name: buzz-development-team
+
+x-agent-common: &agent-common
+  init: true
+  restart: unless-stopped
+  read_only: true
+  cap_drop:
+    - ALL
+  security_opt:
+    - no-new-privileges:true
+  pids_limit: 512
+  stop_grace_period: 45s
+  tmpfs:
+    - /tmp:rw,noexec,nosuid,nodev,size=256m,uid=10001,gid=10001
+  environment: &common-environment
+    BUZZ_RELAY_URL: ${BUZZ_RELAY_URL:?set BUZZ_RELAY_URL}
+    BUZZ_ACP_AGENT_OWNER: ${BUZZ_AGENT_OWNER_HEX:?set BUZZ_AGENT_OWNER_HEX}
+    BUZZ_ACP_AGENTS: "1"
+    BUZZ_ACP_RESPOND_TO: owner-only
+    BUZZ_ACP_ALLOWED_RESPOND_TO: owner-only,allowlist
+    BUZZ_ACP_IDLE_TIMEOUT: "620"
+    BUZZ_ACP_MAX_TURN_DURATION: "7200"
+    BUZZ_ACP_PERMISSION_MODE: bypass-permissions
+    BUZZ_ACP_SYSTEM_PROMPT_FILE: /home/agent/.agent/system-prompt.md
+    KANEO_API_URL: ${KANEO_API_URL:?set KANEO_API_URL}
+    ENABLE_KANEO_MCP: "false"
+    ENABLE_NATIVE_MCP: "true"
+    ENABLE_GITHUB_GATEWAY_MCP: "false"
+  logging:
+    driver: json-file
+    options:
+      max-size: 10m
+      max-file: "3"
+
+services:
+  github-gateway:
+    image: ${GITHUB_GATEWAY_IMAGE:-local/github-app-agent-gateway:196c5a3}
+    init: true
+    restart: unless-stopped
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 128
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=64m,uid=1000,gid=1000
+    environment:
+      GATEWAY_HOST: 0.0.0.0
+      GATEWAY_PORT: "8787"
+      GATEWAY_ALLOWED_HOSTS: github-gateway,localhost,127.0.0.1
+      GATEWAY_ALLOWED_OWNERS: ${GITHUB_GATEWAY_ALLOWED_OWNERS:-darimuri}
+      GATEWAY_CREDENTIALS_ROOT: /run/secrets/github-apps
+      GATEWAY_APPS_FILE: /run/gateway/apps.json
+      GATEWAY_AGENTS_FILE: /run/gateway/agents.json
+      GATEWAY_JOBS_FILE: /run/gateway/jobs.json
+    volumes:
+      - ${GITHUB_GATEWAY_CREDENTIALS_ROOT:?set GITHUB_GATEWAY_CREDENTIALS_ROOT}:/run/secrets/github-apps:ro
+      - ${GITHUB_GATEWAY_RUNTIME_DIR:?set GITHUB_GATEWAY_RUNTIME_DIR}:/run/gateway:ro
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - fetch('http://127.0.0.1:8787/healthz').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))
+      interval: 10s
+      timeout: 3s
+      retries: 6
+      start_period: 5s
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+
+  dispatcher-planner:
+    <<: *agent-common
+    image: ${DISPATCHER_IMAGE:-local/buzz-agent-claude:2.1.278}
+    build:
+      context: .
+      dockerfile: ${DISPATCHER_DOCKERFILE:-docker/Dockerfile.claude}
+      args:
+        BUZZ_SPRIG_IMAGE: ${AGENT_BUZZ_SPRIG_IMAGE:-ghcr.io/block/buzz-sprig:sha-6530b58@sha256:17facfc7608d8ddb33bc056c9aaba1098f4ef6abe5655702fbfd7584d1f74d76}
+        CLAUDE_CODE_VERSION: ${AGENT_CLAUDE_CODE_VERSION:-2.1.278}
+        CLAUDE_ACP_VERSION: ${AGENT_CLAUDE_ACP_VERSION:-0.79.0}
+        CODEX_VERSION: ${AGENT_CODEX_VERSION:-0.154.0}
+        CODEX_ACP_VERSION: ${AGENT_CODEX_ACP_VERSION:-1.12.0}
+        KANEO_MCP_VERSION: ${AGENT_KANEO_MCP_VERSION:-0.1.11}
+    environment:
+      <<: *common-environment
+      AGENT_PROVIDER: ${DISPATCHER_PROVIDER:-claude}
+      AGENT_ROLE: dispatcher-planner
+      AGENT_ROLE_PROMPT: /run/agent/prompts/DISPATCHER_PLANNER.md
+      BUZZ_ACP_MODEL: ${DISPATCHER_MODEL:-claude-sonnet-5}
+      BUZZ_ACP_SESSION_TITLE: Dispatcher Planner
+      ENABLE_GITHUB_GATEWAY_MCP: "true"
+      GITHUB_GATEWAY_MCP_URL: ${GITHUB_GATEWAY_MCP_URL:-http://github-gateway:8787/mcp}
+    depends_on:
+      github-gateway:
+        condition: service_healthy
+    volumes:
+      - ./prompts:/run/agent/prompts:ro
+      - ${DISPATCHER_CREDENTIALS_DIR:?set DISPATCHER_CREDENTIALS_DIR}:/run/agent/credentials:ro
+      - ${DISPATCHER_WORKSPACE:?set DISPATCHER_WORKSPACE}:/workspace:ro
+      - dispatcher-state:/home/agent
+
+  developer-a:
+    <<: *agent-common
+    image: local/buzz-agent-codex:${AGENT_CODEX_VERSION:-0.154.0}
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.codex
+      args:
+        BUZZ_SPRIG_IMAGE: ${AGENT_BUZZ_SPRIG_IMAGE:-ghcr.io/block/buzz-sprig:sha-6530b58@sha256:17facfc7608d8ddb33bc056c9aaba1098f4ef6abe5655702fbfd7584d1f74d76}
+        CODEX_VERSION: ${AGENT_CODEX_VERSION:-0.154.0}
+        CODEX_ACP_VERSION: ${AGENT_CODEX_ACP_VERSION:-1.12.0}
+        KANEO_MCP_VERSION: ${AGENT_KANEO_MCP_VERSION:-0.1.11}
+    environment:
+      <<: *common-environment
+      AGENT_PROVIDER: codex
+      AGENT_ROLE: developer
+      AGENT_ROLE_PROMPT: /run/agent/prompts/DEVELOPER.md
+      BUZZ_ACP_MODEL: ${DEVELOPER_MODEL:-gpt-5.3-codex}
+      BUZZ_ACP_SESSION_TITLE: Developer A
+      ENABLE_GITHUB_GATEWAY_MCP: "true"
+      GITHUB_GATEWAY_MCP_URL: ${GITHUB_GATEWAY_MCP_URL:-http://github-gateway:8787/mcp}
+    depends_on:
+      github-gateway:
+        condition: service_healthy
+    volumes:
+      - ./prompts:/run/agent/prompts:ro
+      - ${DEVELOPER_CREDENTIALS_DIR:?set DEVELOPER_CREDENTIALS_DIR}:/run/agent/credentials:ro
+      - ${DEVELOPER_WORKSPACE:?set DEVELOPER_WORKSPACE}:/workspace:rw
+      - developer-state:/home/agent
+
+  reviewer-a:
+    <<: *agent-common
+    image: ${REVIEWER_IMAGE:-local/buzz-agent-claude:2.1.278}
+    build:
+      context: .
+      dockerfile: ${REVIEWER_DOCKERFILE:-docker/Dockerfile.claude}
+      args:
+        BUZZ_SPRIG_IMAGE: ${AGENT_BUZZ_SPRIG_IMAGE:-ghcr.io/block/buzz-sprig:sha-6530b58@sha256:17facfc7608d8ddb33bc056c9aaba1098f4ef6abe5655702fbfd7584d1f74d76}
+        CLAUDE_CODE_VERSION: ${AGENT_CLAUDE_CODE_VERSION:-2.1.278}
+        CLAUDE_ACP_VERSION: ${AGENT_CLAUDE_ACP_VERSION:-0.79.0}
+        CODEX_VERSION: ${AGENT_CODEX_VERSION:-0.154.0}
+        CODEX_ACP_VERSION: ${AGENT_CODEX_ACP_VERSION:-1.12.0}
+        KANEO_MCP_VERSION: ${AGENT_KANEO_MCP_VERSION:-0.1.11}
+    environment:
+      <<: *common-environment
+      AGENT_PROVIDER: ${REVIEWER_PROVIDER:-claude}
+      AGENT_ROLE: reviewer
+      AGENT_ROLE_PROMPT: /run/agent/prompts/REVIEWER.md
+      BUZZ_ACP_MODEL: ${REVIEWER_MODEL:-claude-opus-5}
+      BUZZ_ACP_SESSION_TITLE: Reviewer A
+      ENABLE_GITHUB_GATEWAY_MCP: "true"
+      GITHUB_GATEWAY_MCP_URL: ${GITHUB_GATEWAY_MCP_URL:-http://github-gateway:8787/mcp}
+    depends_on:
+      github-gateway:
+        condition: service_healthy
+    volumes:
+      - ./prompts:/run/agent/prompts:ro
+      - ${REVIEWER_CREDENTIALS_DIR:?set REVIEWER_CREDENTIALS_DIR}:/run/agent/credentials:ro
+      - ${REVIEWER_WORKSPACE:?set REVIEWER_WORKSPACE}:/workspace:ro
+      - reviewer-state:/home/agent
+
+volumes:
+  dispatcher-state:
+  developer-state:
+  reviewer-state:
