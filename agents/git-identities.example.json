@@ -1,0 +1,7 @@
+{
+  "identities": [
+    { "agentId": "dispatcher-planner", "name": "Fixture Dispatcher", "email": "dispatcher@agents.example.test" },
+    { "agentId": "developer-a", "name": "Fixture Developer", "email": "developer@agents.example.test" },
+    { "agentId": "reviewer-a", "name": "Fixture Reviewer", "email": "reviewer@agents.example.test" }
+  ]
+}

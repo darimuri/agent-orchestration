@@ -36,6 +36,7 @@ UIDs.
 ```bash
 cp .env.example .env
 $EDITOR .env
+# First configure the required external AGENT_GIT_IDENTITY_MANIFEST (see GIT_IDENTITY.md).
 ./scripts/provision-runtime.sh
 ```
 
@@ -158,7 +159,7 @@ Optional files:
 ```text
 buzz-api-token            relay API token when enforced
 gh-token                  GitHub CLI token
-gitconfig                 complete runtime Git configuration
+gitconfig                 REQUIRED generated persona identity; see GIT_IDENTITY.md
 git-credentials           Git credential-store file for a disposable PoC only
 git-ssh-key               SSH private key
 known_hosts               SSH known-hosts file
@@ -522,3 +523,10 @@ host 자원을 고갈시킬 수 있다.
   <https://docs.anthropic.com/en/docs/claude-code/getting-started>
 - Kaneo MCP setup: `../KANEO-MCP-SETUP.md`
 - Subscription credential design: `../SUBSCRIPTION-OAUTH-SANDBOX.md`
+
+## Required Git identity migration
+
+See [GIT_IDENTITY.md](GIT_IDENTITY.md) before provisioning or upgrading images.
+Each persona now requires an approved external manifest and managed Git config;
+missing or conflicting identities fail closed. Production attribution and rollout
+require separate verification. The example mapping contains test identities only.
