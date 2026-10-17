@@ -29,6 +29,7 @@ set +a
 : "${GITHUB_GATEWAY_CREDENTIALS_BASE_DIR:=${host_home}/.config/darimuri-agent-orchestration}"
 
 required_variables=(
+  AGENT_GIT_IDENTITY_MANIFEST
   AGENT_WORKSPACE_ORGANIZATION
   AGENT_WORKSPACE_GIT_URL_TEMPLATE
   GITHUB_GATEWAY_IMAGE
@@ -158,6 +159,9 @@ for ((left_index = 0; left_index < ${#managed_path_names[@]}; left_index++)); do
       "${left_name}" "${!left_name}" "${right_name}" "${!right_name}"
   done
 done
+
+# Validate all identities before any provisioning mutation or token creation.
+node "${root_dir}/docker/git-identity.mjs" validate "${AGENT_GIT_IDENTITY_MANIFEST}"
 
 provision_lock_dir="${XDG_RUNTIME_DIR:-${HOME}/.cache/darimuri-agent-orchestration}"
 install -d -m 0700 "${provision_lock_dir}"
@@ -334,6 +338,11 @@ record_missing_alternative() {
   fi
 }
 
+# Under the existing provisioning lock, reject all conflicts before changing layout.
+as_root "${node_path}" "${root_dir}/docker/git-identity.mjs" check-install \
+  "${AGENT_GIT_IDENTITY_MANIFEST}" \
+  "${DISPATCHER_CREDENTIALS_DIR}" "${DEVELOPER_CREDENTIALS_DIR}" "${REVIEWER_CREDENTIALS_DIR}"
+
 ensure_workspace_root dispatcher-planner "${DISPATCHER_WORKSPACE}"
 ensure_workspace_root developer-a "${DEVELOPER_WORKSPACE}"
 ensure_workspace_root reviewer-a "${REVIEWER_WORKSPACE}"
@@ -341,6 +350,9 @@ ensure_workspace_root reviewer-a "${REVIEWER_WORKSPACE}"
 prepare_agent_credentials "${DISPATCHER_CREDENTIALS_DIR}"
 prepare_agent_credentials "${DEVELOPER_CREDENTIALS_DIR}"
 prepare_agent_credentials "${REVIEWER_CREDENTIALS_DIR}"
+as_root "${node_path}" "${root_dir}/docker/git-identity.mjs" install \
+  "${AGENT_GIT_IDENTITY_MANIFEST}" \
+  "${DISPATCHER_CREDENTIALS_DIR}" "${DEVELOPER_CREDENTIALS_DIR}" "${REVIEWER_CREDENTIALS_DIR}"
 prepare_gateway_runtime
 prepare_gateway_credentials_root
 

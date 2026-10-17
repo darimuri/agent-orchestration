@@ -28,7 +28,7 @@ cleanup() {
 }
 trap cleanup EXIT
 
-credentials_dir="${scratch_dir}/credentials"
+credentials_dir="${scratch_dir}/credential-template"
 workspace_dir="${scratch_dir}/workspace"
 mkdir -p "${credentials_dir}" "${workspace_dir}"
 chmod 0700 "${credentials_dir}"
@@ -40,6 +40,18 @@ printf '%s' '{}' >"${credentials_dir}/kaneo-credentials.json"
 printf '%s' 'test-gateway-agent-token-that-is-never-written-to-config' \
   >"${credentials_dir}/github-gateway-agent-token"
 chmod 0600 "${credentials_dir}"/*
+
+for persona in dispatcher-planner developer-a reviewer-a; do
+  mkdir -p "${scratch_dir}/${persona}"
+  cp "${credentials_dir}"/* "${scratch_dir}/${persona}/"
+done
+docker run --rm --user 0:0 --entrypoint node \
+  --mount "type=bind,src=${root_dir},dst=/test,readonly" \
+  --mount "type=bind,src=${scratch_dir},dst=/smoke" \
+  "${codex_image}" /test/docker/git-identity.mjs install \
+  /test/git-identities.example.json \
+  /smoke/dispatcher-planner /smoke/developer-a /smoke/reviewer-a
+
 
 docker run --rm \
   --user 0:0 \
@@ -54,7 +66,6 @@ common_args=(
   --tmpfs /tmp:rw,noexec,nosuid,nodev,size=64m,uid=10001,gid=10001
   --tmpfs /home/agent:rw,nosuid,nodev,size=128m,uid=10001,gid=10001
   --mount "type=bind,src=${root_dir}/prompts,dst=/run/agent/prompts,readonly"
-  --mount "type=bind,src=${credentials_dir},dst=/run/agent/credentials,readonly"
   --mount "type=bind,src=${workspace_dir},dst=/workspace"
   --env BUZZ_RELAY_URL=wss://buzz.example.test
   --env BUZZ_ACP_AGENT_OWNER=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
@@ -65,12 +76,20 @@ common_args=(
 
 docker run "${common_args[@]}" \
   --env AGENT_PROVIDER=claude \
+  --mount "type=bind,src=${scratch_dir}/dispatcher-planner,dst=/run/agent/credentials,readonly" \
   --env AGENT_ROLE=dispatcher-planner \
   --env AGENT_ROLE_PROMPT=/run/agent/prompts/DISPATCHER_PLANNER.md \
   --env ENABLE_GITHUB_GATEWAY_MCP=true \
   --env GITHUB_GATEWAY_MCP_URL=http://github-gateway.example.test:8787/mcp \
   "${claude_image}" \
   bash -lc '
+    test "$(git config --global user.name)" = "Fixture Dispatcher"
+    test "$(git config --global user.email)" = "dispatcher@agents.example.test"
+    test "$(git config --global user.useConfigOnly)" = true
+    test "$(stat -c %u:%g:%a "${HOME}/.gitconfig")" = 10001:10001:600
+    git init -q /tmp/identity-repo
+    git -C /tmp/identity-repo commit --allow-empty -qm fixture
+    test "$(git -C /tmp/identity-repo log -1 --format=%ae)" = "dispatcher@agents.example.test"
     test "$(id -u)" = 10001
     test -n "${BUZZ_PRIVATE_KEY}"
     test -n "${CLAUDE_CODE_OAUTH_TOKEN}"
@@ -91,12 +110,20 @@ docker run "${common_args[@]}" \
 
 docker run "${common_args[@]}" \
   --env AGENT_PROVIDER=claude \
+  --mount "type=bind,src=${scratch_dir}/reviewer-a,dst=/run/agent/credentials,readonly" \
   --env AGENT_ROLE=reviewer \
   --env AGENT_ROLE_PROMPT=/run/agent/prompts/REVIEWER.md \
   --env ENABLE_GITHUB_GATEWAY_MCP=true \
   --env GITHUB_GATEWAY_MCP_URL=http://github-gateway.example.test:8787/mcp \
   "${claude_image}" \
   bash -lc '
+    test "$(git config --global user.name)" = "Fixture Reviewer"
+    test "$(git config --global user.email)" = "reviewer@agents.example.test"
+    test "$(git config --global user.useConfigOnly)" = true
+    test "$(stat -c %u:%g:%a "${HOME}/.gitconfig")" = 10001:10001:600
+    git init -q /tmp/identity-repo
+    git -C /tmp/identity-repo commit --allow-empty -qm fixture
+    test "$(git -C /tmp/identity-repo log -1 --format=%ae)" = "reviewer@agents.example.test"
     test -n "${GITHUB_GATEWAY_AGENT_TOKEN}"
     test -z "${BUZZ_ACP_MCP_COMMAND+x}"
     jq -e '\''
@@ -110,12 +137,20 @@ docker run "${common_args[@]}" \
 
 docker run "${common_args[@]}" \
   --env AGENT_PROVIDER=codex \
+  --mount "type=bind,src=${scratch_dir}/developer-a,dst=/run/agent/credentials,readonly" \
   --env AGENT_ROLE=developer \
   --env AGENT_ROLE_PROMPT=/run/agent/prompts/DEVELOPER.md \
   --env ENABLE_GITHUB_GATEWAY_MCP=true \
   --env GITHUB_GATEWAY_MCP_URL=http://github-gateway.example.test:8787/mcp \
   "${codex_image}" \
   bash -lc '
+    test "$(git config --global user.name)" = "Fixture Developer"
+    test "$(git config --global user.email)" = "developer@agents.example.test"
+    test "$(git config --global user.useConfigOnly)" = true
+    test "$(stat -c %u:%g:%a "${HOME}/.gitconfig")" = 10001:10001:600
+    git init -q /tmp/identity-repo
+    git -C /tmp/identity-repo commit --allow-empty -qm fixture
+    test "$(git -C /tmp/identity-repo log -1 --format=%ae)" = "developer@agents.example.test"
     test "$(id -u)" = 10001
     test -n "${BUZZ_PRIVATE_KEY}"
     test -r "${CODEX_HOME}/auth.json"

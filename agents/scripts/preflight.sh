@@ -29,6 +29,7 @@ set +a
 : "${REVIEWER_PROVIDER:=claude}"
 
 required_variables=(
+  AGENT_GIT_IDENTITY_MANIFEST
   BUZZ_RELAY_URL
   KANEO_API_URL
   AGENT_WORKSPACE_ORGANIZATION
@@ -328,6 +329,10 @@ check_gateway() {
       "Gateway App private key" "${gateway_uid}"
   done
 }
+
+# Compare the complete approved mapping and verify UID, GID, modes and paths.
+node "${root_dir}/docker/git-identity.mjs" check "${AGENT_GIT_IDENTITY_MANIFEST}" \
+  "${DISPATCHER_CREDENTIALS_DIR}" "${DEVELOPER_CREDENTIALS_DIR}" "${REVIEWER_CREDENTIALS_DIR}"
 
 check_agent dispatcher-planner "${DISPATCHER_PROVIDER}" \
   "${DISPATCHER_CREDENTIALS_DIR}" "${DISPATCHER_WORKSPACE}" read-only true

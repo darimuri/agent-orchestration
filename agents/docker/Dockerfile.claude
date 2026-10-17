@@ -21,6 +21,7 @@ RUN apt-get update \
 
 COPY --from=buzz-runtime /usr/local/bin/sprig /usr/local/bin/sprig
 COPY docker/agent-entrypoint.sh /usr/local/bin/agent-entrypoint
+COPY docker/git-identity.mjs /usr/local/bin/git-identity.mjs
 COPY docker/generate-mcp-config.mjs /usr/local/libexec/generate-mcp-config.mjs
 COPY docker/kaneo-mcp-safe-proxy.mjs /usr/local/libexec/kaneo-mcp-safe-proxy.mjs
 COPY mcp/servers.json /etc/buzz-agent/mcp-servers.json

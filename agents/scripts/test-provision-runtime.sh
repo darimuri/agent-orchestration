@@ -49,6 +49,7 @@ AGENT_WORKSPACE_ORGANIZATION=test-org
 AGENT_WORKSPACE_GIT_URL_TEMPLATE=${scratch_dir}/sources/{owner}/{repository}.git
 AGENT_WORKSPACE_DEFAULT_REF=main
 AGENT_RUNTIME_ROOT=${scratch_dir}/agent-runtime
+AGENT_GIT_IDENTITY_MANIFEST=${scratch_dir}/git-identities.json
 XDG_RUNTIME_DIR=${scratch_dir}/run
 GITHUB_GATEWAY_ALLOWED_OWNERS=test-org
 GITHUB_GATEWAY_IMAGE=${expected_gateway_image}
@@ -70,6 +71,8 @@ DEVELOPER_PROVIDER=codex
 REVIEWER_PROVIDER=codex
 EOF
 
+cp "${root_dir}/git-identities.example.json" "${scratch_dir}/git-identities.json"
+
 expect_runtime_failure() {
   local label="$1"
   local candidate_env="$2"
@@ -83,7 +86,7 @@ expect_runtime_failure() {
 expect_preflight_failure() {
   local label="$1"
   local candidate_env="${2:-${env_file}}"
-  if "${root_dir}/scripts/preflight.sh" "${candidate_env}" >/dev/null 2>&1; then
+  if as_root "${root_dir}/scripts/preflight.sh" "${candidate_env}" >/dev/null 2>&1; then
     printf 'Unsafe gateway agent state passed preflight: %s\n' "${label}" >&2
     exit 1
   fi
@@ -255,4 +258,35 @@ as_root node --input-type=module -e '
 ' "${agents_file}"
 expect_runtime_failure 'mismatched gateway token' "${env_file}"
 
-printf 'Runtime provisioning tests passed.\n'
+
+# Identity regressions operate only on this test's temporary runtime.
+identity_file="${scratch_dir}/agent-runtime/developer/credentials/gitconfig"
+identity_baseline="${scratch_dir}/identity-baseline"
+as_root cp "${identity_file}" "${identity_baseline}"
+restore_identity() {
+  as_root install -m 0600 -o 10001 -g 10001 "${identity_baseline}" "${identity_file}"
+}
+# Restore the intentionally invalid gateway record from the previous test first.
+restore_agents
+as_root "${root_dir}/scripts/preflight.sh" "${env_file}" >/dev/null
+as_root chown 10001:1000 "${identity_file}"
+expect_preflight_failure 'identity GID'
+restore_identity
+as_root chmod 0644 "${identity_file}"
+expect_preflight_failure 'identity mode'
+restore_identity
+as_root rm "${identity_file}"
+expect_preflight_failure 'missing identity'
+as_root ln -s "${identity_baseline}" "${identity_file}"
+expect_preflight_failure 'symlink identity'
+expect_runtime_failure 'symlink identity' "${env_file}"
+as_root rm "${identity_file}"
+restore_identity
+as_root install -m 0600 -o 10001 -g 10001 \
+  "${scratch_dir}/agent-runtime/reviewer/credentials/gitconfig" "${identity_file}"
+expect_preflight_failure 'shared identity'
+expect_runtime_failure 'conflicting identity preserved' "${env_file}"
+as_root cmp "${identity_file}" "${scratch_dir}/agent-runtime/reviewer/credentials/gitconfig"
+restore_identity
+as_root "${root_dir}/scripts/preflight.sh" "${env_file}" >/dev/null
+printf 'Runtime provisioning and identity tests passed.\n'

@@ -51,6 +51,11 @@ copy_private_file() {
 [[ -n "${BUZZ_RELAY_URL:-}" ]] || die "BUZZ_RELAY_URL is required"
 [[ -n "${BUZZ_ACP_AGENT_OWNER:-}" ]] || die "BUZZ_ACP_AGENT_OWNER is required"
 
+# A missing/invalid mounted identity must not fall back to persistent HOME state.
+node "$(dirname "${BASH_SOURCE[0]}")/git-identity.mjs" apply \
+  "${credentials_dir}/gitconfig" "${HOME}/.gitconfig" "${AGENT_ROLE:-}" \
+  || die "Git identity is required; provision approved persona identities before starting"
+
 mkdir -p "$(dirname "${generated_prompt}")" "${XDG_CONFIG_HOME}" "${XDG_CACHE_HOME}"
 {
   printf '<common-instructions>\n'
@@ -67,7 +72,6 @@ read_secret BUZZ_AUTH_TAG buzz-auth-tag false || true
 read_secret BUZZ_API_TOKEN buzz-api-token false || true
 read_secret GH_TOKEN gh-token false || true
 
-copy_private_file gitconfig "${HOME}/.gitconfig" || true
 if copy_private_file git-credentials "${HOME}/.git-credentials"; then
   git config --global credential.helper store
 fi
