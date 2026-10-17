@@ -3,7 +3,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 export const personas = ['dispatcher-planner', 'developer-a', 'reviewer-a'];
-const uid = 10001;
+// Library callers may inject fixture ownership. CLI callers always use this default.
+const runtimeOwner = Object.freeze({ uid: 10001, gid: 10001 });
 class IdentityError extends Error {}
 const fail = (message) => { throw new IdentityError(message); };
 const exactKeys = (value, keys) => value && typeof value === 'object'
@@ -67,27 +68,27 @@ function regular(file, optional = false) {
   if (!stat.isFile() || stat.nlink !== 1) fail('identity file must be regular with one link');
   return stat;
 }
-function privateFile(file) {
+function privateFile(file, owner) {
   const stat = regular(file);
-  if (stat.uid !== uid || stat.gid !== uid || (stat.mode & 0o777) !== 0o600) {
+  if (stat.uid !== owner.uid || stat.gid !== owner.gid || (stat.mode & 0o777) !== 0o600) {
     fail('identity file requires 10001:10001 and mode 0600');
   }
 }
-function privateDirectory(dir) {
+function privateDirectory(dir, owner) {
   safePath(dir);
   const stat = fs.lstatSync(dir);
-  if (!stat.isDirectory() || stat.uid !== uid || stat.gid !== uid || (stat.mode & 0o777) !== 0o700) {
+  if (!stat.isDirectory() || stat.uid !== owner.uid || stat.gid !== owner.gid || (stat.mode & 0o777) !== 0o700) {
     fail('identity directory requires 10001:10001 and mode 0700');
   }
 }
-function atomicWrite(file, content) {
+function atomicWrite(file, content, owner) {
   safePath(file);
   regular(file, true);
   const temporary = fs.mkdtempSync(path.join(path.dirname(file), '.git-identity-'));
   const staged = path.join(temporary, 'gitconfig');
   try {
     fs.writeFileSync(staged, content, { flag: 'wx', mode: 0o600 });
-    fs.chownSync(staged, uid, uid);
+    fs.chownSync(staged, owner.uid, owner.gid);
     fs.renameSync(staged, file);
   } finally { fs.rmSync(temporary, { recursive: true, force: true }); }
 }
@@ -106,29 +107,29 @@ export function checkInstall(records, directories) {
     }
   }
 }
-export function install(records, directories) {
+export function install(records, directories, owner = runtimeOwner) {
   // Check every destination before any write, including a conflict in the last persona.
   checkInstall(records, directories);
   for (let i = 0; i < directories.length; i++) {
     fs.mkdirSync(directories[i], { recursive: true, mode: 0o700 });
-    fs.chownSync(directories[i], uid, uid);
+    fs.chownSync(directories[i], owner.uid, owner.gid);
     fs.chmodSync(directories[i], 0o700);
-    atomicWrite(path.join(directories[i], 'gitconfig'), render(records[i]));
+    atomicWrite(path.join(directories[i], 'gitconfig'), render(records[i]), owner);
   }
 }
-export function check(records, directories) {
+export function check(records, directories, owner = runtimeOwner) {
   checkInstall(records, directories);
   for (const dir of directories) {
-    privateDirectory(dir);
-    privateFile(path.join(dir, 'gitconfig'));
+    privateDirectory(dir, owner);
+    privateFile(path.join(dir, 'gitconfig'), owner);
   }
 }
 
-export function applyIdentity(source, destination, role) {
+export function applyIdentity(source, destination, role, owner = runtimeOwner) {
   const persona = ({ developer: 'developer-a', reviewer: 'reviewer-a' })[role] ?? role;
   if (!personas.includes(persona)) fail('unknown identity persona');
-  privateDirectory(path.dirname(source));
-  privateFile(source);
+  privateDirectory(path.dirname(source), owner);
+  privateFile(source, owner);
   const content = fs.readFileSync(source, 'utf8');
   // Parse only our generated subset, never Git includes, helpers, or arbitrary config.
   const match = content.match(/^# Managed agent Git identity v1: ([a-z-]+)\n\[user\]\n\tname = ("(?:[^"\\\n]|\\["\\])*")\n\temail = ("(?:[^"\\\n]|\\["\\])*")\n\tuseConfigOnly = true\n$/);
@@ -138,7 +139,7 @@ export function applyIdentity(source, destination, role) {
   catch { fail('invalid managed gitconfig'); }
   validateRecord(record);
   if (render(record) !== content) fail('invalid managed gitconfig');
-  atomicWrite(destination, content);
+  atomicWrite(destination, content, owner);
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

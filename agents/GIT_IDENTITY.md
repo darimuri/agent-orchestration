@@ -105,9 +105,14 @@ access. Check effective values in the actual repository before a live commit.
 ## Local and host verification
 
 No production credentials or actual persona addresses are needed for fixtures.
-The Node suite runs as UID/GID 10001 (the agent image); it tests real Git commits,
-repeated startup with persistent HOME, missing/shared/invalid identities, conflict
-preservation, modes, symlinks and hardlinks. Run all local Node package tests:
+The Node unit suite injects the current process UID/GID through library calls,
+so ordinary non-root host users can run it without chown privileges. It tests real
+Git commits, repeated identity application with persistent HOME, missing/shared/invalid
+identities, conflict preservation, modes, symlinks and hardlinks. Separate regressions
+verify UID/GID mismatches and that production CLI commands keep the fixed
+10001:10001 default with no fixture override. The actual shell-entrypoint integration
+case additionally requires UID/GID 10001 and `/workspace`; ordinary hosts skip only
+that case, and the image suite executes it. Run all local Node package tests:
 
 ```bash
 node --test agents/docker/*.test.mjs
@@ -128,8 +133,9 @@ checks; run as the normal host user. The second builds both images, runs the Nod
 identity suite as UID 10001, checks all three distinct container identities with
 local commits, and runs existing proxy/Gateway smoke tests. It needs network access
 for image/package builds but never starts the production Compose project. Running
-`node --test agents/docker/*.test.mjs` directly on a host with another UID will fail
-ownership checks; use the image suite there. These image and privileged checks must
+`node --test agents/docker/*.test.mjs` is supported directly on a non-root host;
+actual entrypoint and privileged ownership integration remain in the image/host
+suites and retain 10001:10001 validation. These image and privileged checks must
 be reported as pending if Docker/sudo are unavailable, never as passed.
 
 ## GitHub attribution acceptance remains separate

@@ -5,7 +5,12 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { personas, validateManifest, loadManifest, render, install, check, applyIdentity } from './git-identity.mjs';
+import { personas, validateManifest, loadManifest, render, install as installIdentity, check as checkIdentity, applyIdentity as applyWithOwner } from './git-identity.mjs';
+
+const fixtureOwner = Object.freeze({ uid: process.getuid(), gid: process.getgid() });
+const install = (records, dirs) => installIdentity(records, dirs, fixtureOwner);
+const check = (records, dirs) => checkIdentity(records, dirs, fixtureOwner);
+const applyIdentity = (source, destination, role) => applyWithOwner(source, destination, role, fixtureOwner);
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const example = path.join(here, '../git-identities.example.json');
@@ -58,7 +63,7 @@ test('install, repeat, apply and real local commits preserve three distinct iden
     fs.writeFileSync(target, '[user]\n name = stale\n email = stale@agents.example.test\n');
     applyIdentity(path.join(directories[i], 'gitconfig'), target, records[i].agentId);
     const stat = fs.statSync(target);
-    assert.equal(stat.mode & 0o777, 0o600); assert.equal(stat.uid, 10001); assert.equal(stat.gid, 10001);
+    assert.equal(stat.mode & 0o777, 0o600); assert.equal(stat.uid, fixtureOwner.uid); assert.equal(stat.gid, fixtureOwner.gid);
     const env = isolatedEnv(home);
     assert.equal(run('git', ['init', '-q', repo], { env }).status, 0);
     assert.equal(run('git', ['config', '--local', '--get', 'user.name'], { cwd: repo, env }).status, 1);
@@ -113,7 +118,65 @@ test('preflight validation rejects missing, wrong persona/value/useConfigOnly an
   fs.unlinkSync(file); assert.throws(() => check(records, directories));
 });
 
-test('entrypoint fails before credential loading despite stale HOME; valid identities start and restart', t => {
+test('identity application rejects stale HOME fallback and supports repeated application', t => {
+  const { root, directories, records } = setup(t);
+  install(records, directories);
+  const home = path.join(root, 'home'); fs.mkdirSync(home);
+  const destination = path.join(home, '.gitconfig');
+  const stale = '[user]\n name = stale\n email = stale@agents.example.test\n';
+  fs.writeFileSync(destination, stale);
+  const source = path.join(directories[1], 'gitconfig');
+  const apply = () => applyIdentity(source, destination, 'developer');
+  fs.unlinkSync(source);
+  assert.throws(apply);
+  assert.equal(fs.readFileSync(destination, 'utf8'), stale);
+  install(records, directories);
+  fs.writeFileSync(source, render(records[0]));
+  assert.throws(apply);
+  assert.equal(fs.readFileSync(destination, 'utf8'), stale);
+  fs.writeFileSync(source, render(records[1]));
+  apply(); apply();
+  assert.equal(fs.readFileSync(destination, 'utf8'), render(records[1]));
+  fs.unlinkSync(destination); fs.symlinkSync(path.join(root, 'outside'), destination);
+  assert.throws(apply); assert.equal(fs.existsSync(path.join(root, 'outside')), false);
+});
+
+test('ownership checks reject both UID and GID mismatches independently', t => {
+  const { root, directories, records } = setup(t);
+  install(records, directories);
+  for (const owner of [
+    { ...fixtureOwner, uid: fixtureOwner.uid + 1 },
+    { ...fixtureOwner, gid: fixtureOwner.gid + 1 },
+  ]) {
+    assert.throws(() => checkIdentity(records, directories, owner));
+    assert.throws(() => applyWithOwner(path.join(directories[0], 'gitconfig'),
+      path.join(root, '.gitconfig'), records[0].agentId, owner));
+  }
+});
+
+test('production CLI keeps fixed 10001:10001 ownership and offers no fixture override', t => {
+  const { root, directories, records } = setup(t);
+  install(records, directories);
+  const cli = path.join(here, 'git-identity.mjs');
+  const args = [cli, 'check', example, ...directories];
+  const matchesRuntime = fixtureOwner.uid === 10001 && fixtureOwner.gid === 10001;
+  const result = run('node', args);
+  assert.equal(result.status, matchesRuntime ? 0 : 1);
+  if (!matchesRuntime) assert.match(result.stderr, /10001:10001/);
+  const apply = run('node', [cli, 'apply', path.join(directories[1], 'gitconfig'),
+    path.join(root, '.gitconfig'), 'developer']);
+  assert.equal(apply.status, matchesRuntime ? 0 : 1);
+  // Extra CLI arguments cannot inject the library-only ownership parameter.
+  assert.notEqual(run('node', [...args, '--uid', String(fixtureOwner.uid)]).status, 0);
+  assert.notEqual(run('node', [cli, 'apply', path.join(directories[1], 'gitconfig'),
+    path.join(root, '.gitconfig'), 'developer', String(fixtureOwner.uid)]).status, 0);
+});
+
+// Actual shell entrypoint integration needs the runtime UID and workspace mount.
+// The image suite runs this check; portable helper/CLI tests above run on every host.
+test('container entrypoint fails before credential loading and supports restart', {
+  skip: fixtureOwner.uid !== 10001 || fixtureOwner.gid !== 10001 || !fs.existsSync('/workspace'),
+}, t => {
   const { root, directories, records } = setup(t);
   install(records, directories);
   const home = path.join(root, 'home'); fs.mkdirSync(home);
