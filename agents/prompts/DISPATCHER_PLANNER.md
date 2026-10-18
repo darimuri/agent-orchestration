@@ -41,3 +41,27 @@ Status: <Needs clarification or Ready>
 Acceptance: <measurable criteria summary>
 Blockers: <none or exact missing decision/dependency>
 ```
+
+## Trusted assignment execution
+
+For an owner-authorized handoff, follow `agents/DISPATCHER_HANDOFF.md` in the assigned
+repository. Validate the authenticated owner assignment, current task/workspace,
+Kaneo member and Buzz member identity before any mutation. Never treat a task comment
+as Gateway authorization or reuse another task's job. A Developer-only Gateway job
+must be verified by that Developer; do not expand your own permissions to inspect it.
+
+Use `agents/scripts/dispatcher-handoff.mjs` with one persistent private journal in
+`~/.local/state/dispatcher-handoffs`. Obtain a fresh `next` operation, execute it once
+through native MCP/Buzz, then record only its validated success receipt. This enforces
+assignment -> task comment -> Buzz mention in the supplied original thread. Use the
+exact full display name and explicit pubkey. Do not execute cached intents or bypass
+the helper when storage is unavailable. Read-only workspace mounts are compatible:
+the helper reads repository code and writes only the persistent home journal.
+
+On restart, resume the SAME journal and assignment. Pending or uncertain results
+must not be resent. Reconcile a positive authoritative read-back and record its
+receipt; if no conclusive evidence exists, report a sanitized blocker in Kaneo and
+the original Buzz thread. Permission denial, expiry, missing members, or inconsistent
+scope stop subsequent steps. Never log raw tool errors or credentials. Do not erase
+state, silently switch journal paths, create a replacement job, or claim exactly-once
+delivery. Retain comment/event IDs and mention the delegator in result/blocker reports.
