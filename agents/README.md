@@ -530,3 +530,23 @@ See [GIT_IDENTITY.md](GIT_IDENTITY.md) before provisioning or upgrading images.
 Each persona now requires an approved external manifest and managed Git config;
 missing or conflicting identities fail closed. Production attribution and rollout
 require separate verification. The example mapping contains test identities only.
+
+## Dispatcher assignment handoff
+
+[DISPATCHER_HANDOFF.md](DISPATCHER_HANDOFF.md) defines the trusted assignment input,
+owner-only Kaneo role setup, native MCP/Buzz execution and crash reconciliation.
+The Dispatcher uses `scripts/dispatcher-handoff.mjs` to persist each write intent
+before executing it and records success receipts afterward. A pending intent blocks
+automatic retransmission. Its private journal lives in the persistent agent home;
+no additional service, runtime setting, credential or permission change is needed
+for the helper itself. Live role application remains a separate owner action.
+
+Run the local suites with:
+
+```bash
+node --test agents/docker/*.test.mjs agents/scripts/*.test.mjs
+bash github-apps/test-create-apps.sh
+```
+
+These commands assume the repository root. The full Docker smoke suite also includes
+the handoff fixtures; see the handoff guide for prerequisites and limitations.

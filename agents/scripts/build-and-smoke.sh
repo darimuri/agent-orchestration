@@ -49,7 +49,7 @@ docker run --rm \
 docker run --rm \
   --entrypoint node \
   --mount "type=bind,src=${root_dir},dst=/test,readonly" \
-  "${codex_image}" --test /test/docker/git-identity.test.mjs
+  "${codex_image}" --test /test/docker/git-identity.test.mjs /test/scripts/dispatcher-handoff.test.mjs
 
 "${root_dir}/scripts/smoke.sh" "${claude_image}" "${codex_image}"
 "${root_dir}/scripts/test-provision-gateway-agent.sh" "${codex_image}"
