@@ -92,6 +92,20 @@ function save(directory, file, state) {
   try { fs.fsyncSync(dir); } finally { fs.closeSync(dir); }
 }
 
+// Sync the whole ancestry even when mkdir created nothing: an earlier failed
+// attempt or a concurrent creator may have left an unpersisted directory entry.
+// Child-before-parent reaches the root before any execution intent is issued.
+function syncDirectoryChain(directory) {
+  let current = path.resolve(directory);
+  while (true) {
+    const fd = fs.openSync(current, "r");
+    try { fs.fsyncSync(fd); } finally { fs.closeSync(fd); }
+    const parent = path.dirname(current);
+    if (parent === current) break;
+    current = parent;
+  }
+}
+
 // Every command holds the same lock. A killed process leaves a lock, deliberately
 // requiring operator reconciliation rather than guessing whether an effect happened.
 export function dispatch(directory, request, now = Date.now()) {
@@ -101,6 +115,7 @@ export function dispatch(directory, request, now = Date.now()) {
   fs.mkdirSync(directory, { recursive: true, mode: 0o700 });
   const stat = fs.lstatSync(directory);
   if (fs.realpathSync(directory) !== path.resolve(directory) || !stat.isDirectory() || stat.isSymbolicLink() || stat.uid !== process.getuid() || (stat.mode & 0o077)) reject();
+  syncDirectoryChain(directory);
   const file = path.join(directory, `${key}.json`);
   const lock = path.join(directory, `${key}.lock`);
   let fd;

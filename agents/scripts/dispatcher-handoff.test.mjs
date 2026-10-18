@@ -198,3 +198,81 @@ test("receipt can be reconciled after expiry without issuing another effect", t 
   assert.equal(result.status, "recorded");
   assert.equal(next(dir, assignment, preflight, afterExpiry).code, "expired");
 });
+
+function ancestry(directory) {
+  const result = [];
+  for (let current = path.resolve(directory); ; current = path.dirname(current)) {
+    result.push(current);
+    if (path.dirname(current) === current) return result;
+  }
+}
+function traceSync(t, failPath) {
+  const events = [], handles = new Map();
+  const open = fs.openSync, sync = fs.fsyncSync, close = fs.closeSync, rename = fs.renameSync;
+  t.mock.method(fs, "openSync", (...args) => {
+    const fd = open(...args); handles.set(fd, String(args[0])); return fd;
+  });
+  t.mock.method(fs, "fsyncSync", fd => {
+    const name = handles.get(fd);
+    events.push(["sync", name]);
+    if (name === failPath) throw new Error("injected fsync failure");
+    return sync(fd);
+  });
+  t.mock.method(fs, "closeSync", fd => { handles.delete(fd); return close(fd); });
+  t.mock.method(fs, "renameSync", (...args) => { events.push(["rename", ...args]); return rename(...args); });
+  return { events, handles };
+}
+
+for (const suffix of ["journal", "new/parent/journal"]) test(`first-use ${suffix}: ancestry durable before journal publish and execute_once`, t => {
+  const dir = path.join(fixture(t), suffix);
+  const { events, handles } = traceSync(t);
+  const plan = next(dir);
+  assert.equal(plan.status, "execute_once");
+  const chain = ancestry(dir);
+  assert.deepEqual(events.slice(0, chain.length), chain.map(p => ["sync", p]));
+  const file = path.join(dir, `${assignmentKey(assignment)}.json`);
+  assert.deepEqual(events.slice(chain.length), [["sync", `${file}.tmp`], ["rename", `${file}.tmp`, file], ["sync", dir]]);
+  assert.equal(handles.size, 0);
+});
+
+test("every ancestor fsync failure blocks first execution; retry syncs existing chain again", t => {
+  const base = fixture(t);
+  const depth = ancestry(path.join(base, "new/parent/journal")).length;
+  for (let i = 0; i < depth; i++) {
+    const dir = path.join(base, `case-${i}/parent/journal`);
+    const chain = ancestry(dir);
+    const trace = traceSync(t, chain[i]);
+    assert.throws(() => next(dir), /injected fsync failure/);
+    assert.equal(trace.handles.size, 0);
+    assert.equal(trace.events.some(e => e[0] === "rename"), false);
+    assert.equal(fs.existsSync(path.join(dir, `${assignmentKey(assignment)}.json`)), false);
+    t.mock.restoreAll();
+    const retry = traceSync(t);
+    assert.equal(next(dir).status, "execute_once");
+    assert.deepEqual(retry.events.slice(0, chain.length), chain.map(p => ["sync", p]));
+    assert.equal(next(dir).code, "outcome_unknown");
+    t.mock.restoreAll();
+  }
+});
+
+test("journal file fsync failure emits no intent and leaves temporary state for reconciliation", t => {
+  const dir = path.join(fixture(t), "journal");
+  const temp = path.join(dir, `${assignmentKey(assignment)}.json.tmp`);
+  const { handles } = traceSync(t, temp);
+  assert.throws(() => next(dir), /injected fsync failure/);
+  assert.equal(handles.size, 0);
+  t.mock.restoreAll();
+  assert.throws(() => next(dir), /EEXIST/);
+});
+
+test("CLI ancestor fsync failure is sanitized and never emits execute_once", t => {
+  const base = fixture(t), dir = path.join(base, "nested/journal");
+  const inject = path.join(base, "inject.mjs");
+  fs.writeFileSync(inject, `import fs from 'node:fs';\nconst sync = fs.fsyncSync;\nfs.fsyncSync = fd => {\n if (fs.fstatSync(fd).isDirectory()) throw new Error('DO_NOT_LEAK_FSYNC_FAILURE');\n return sync(fd);\n};\n`);
+  const result = spawnSync(process.execPath, ["--import", inject, script, dir], {
+    input: JSON.stringify({ action: "next", assignment, preflight }), encoding: "utf8",
+  });
+  assert.equal(result.status, 1);
+  assert.equal(result.stderr, "");
+  assert.deepEqual(JSON.parse(result.stdout), { status: "blocked", code: "invalid_request_or_journal" });
+});

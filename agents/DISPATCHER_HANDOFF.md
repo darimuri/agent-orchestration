@@ -120,6 +120,13 @@ against a process that can alter the journal or forge receipts.
 
 ## Failure and reconciliation
 
+Before any intent is issued, the helper fsyncs the journal directory and each
+ancestor, child before parent through the filesystem root. This persists newly
+created directory entries as well as the journal file itself. It repeats the chain
+on every invocation: an existing directory may come from an interrupted first
+attempt or a concurrent creator. Any open/fsync/close error blocks execution;
+unsupported directory fsync is not silently ignored.
+
 Every side effect is preceded by a durable pending intent. A second invocation,
 including one after a crash just after a successful send, returns `outcome_unknown`
 and emits NO operation. It cannot distinguish a lost response from an unsent request.
