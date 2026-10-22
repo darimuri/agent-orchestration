@@ -10,7 +10,7 @@ if [[ -r "${root_dir}/.env" ]]; then
   set +a
 fi
 
-readonly image="${1:-local/buzz-agent-codex:${AGENT_CODEX_VERSION:-0.154.0}}"
+readonly image="${1:-local/buzz-agent-codex:${AGENT_CODEX_VERSION:-0.163.0}}"
 readonly host_uid="$(id -u)"
 readonly host_gid="$(id -g)"
 scratch_dir="$(mktemp -d "${root_dir}/.provision-smoke.XXXXXX")"

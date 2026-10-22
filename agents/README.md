@@ -337,7 +337,7 @@ docker compose run --rm --no-deps --entrypoint bash developer-a -lc \
 
 ./scripts/smoke.sh \
   "local/buzz-agent-claude:${AGENT_CLAUDE_CODE_VERSION:-2.1.278}" \
-  "local/buzz-agent-codex:${AGENT_CODEX_VERSION:-0.154.0}"
+  "local/buzz-agent-codex:${AGENT_CODEX_VERSION:-0.163.0}"
 ```
 
 두 개의 선택적 위치 인자는 검증할 Claude와 Codex image reference다. 생략하면 움직이는
@@ -372,6 +372,117 @@ The same session must show successful Kaneo and GitHub gateway tool calls. If on
 server appears, check that `BUZZ_ACP_MCP_COMMAND` is absent, inspect the generated file
 above, verify the agent token has not expired in `agents.json`, and inspect
 `docker compose logs github-gateway` for a sanitized authorization error.
+
+## Codex runtime upgrade (AGE #3)
+
+The default package pins are **Codex CLI 0.163.0 / codex-acp 2.2.2**. There are
+intentionally two Codex versions: direct `codex` uses 0.163.0, while Buzz invokes
+`codex-acp` with **CODEX_PATH unset**, which resolves its compatible dependency,
+currently **0.160.1**. Do not set `CODEX_PATH` to the global CLI to unify them.
+The adapter declares `@openai/codex ^0.160.1` (below 0.161.0); 0.163.0 is outside
+that range. `AGENT_CODEX_ACP_CODEX_VERSION=0.160.1` is the smoke expectation for
+that dependency, not an override of the adapter's executable.
+
+Evidence: the published [2.2.2 package metadata](https://registry.npmjs.org/@agentclientprotocol/codex-acp/2.2.2)
+and its bundled README describe the compatible dependency and optional CODEX_PATH.
+In the published `dist/index.js`, both `startCodexConnection` (ordinary ACP) and
+`spawnCodexCli` resolve `@openai/codex/bin/codex.js` relative to the adapter when
+CODEX_PATH is absent. The image entrypoint invokes this ordinary ACP path, not
+`codex-acp login` (which has a different fallback).
+
+Isolated npm installs verified the supported 0.160.1/2.2.2 pair and the selected
+0.163.0/2.2.2 dual-version pair. `codex-acp cli -V` returned 0.160.1 without an
+override, 0.163.0 with an explicit path to the newer CLI, and failed for a missing
+path. Credential-free ACP `initialize` succeeded with both binaries after creating
+an empty CODEX_HOME. This does **not** establish full compatibility of the forced
+0.163.0 adapter combination; it is not our default. It also does not validate an
+authenticated session, inference, Buzz delivery or live Kaneo/Gateway calls.
+
+`codex-acp@2.2.2 --version` is supported, but smoke deliberately reads the installed
+adapter's `package.json`. To inspect its selected Codex use **`cli -V`**, not
+`cli --version`: 2.2.2 intercepts `--version` and prints the adapter version.
+`docker/codex-runtime-smoke.mjs` verifies the direct CLI, package version, resolved
+bundled path and bundled CLI output. It rejects CODEX_PATH overrides, starts children
+with an empty private home and an allowlisted environment, and suppresses child
+failure output. Image smoke runs this check without network or credential mounts.
+The existing entrypoint/native MCP and Kaneo proxy checks remain required; shell
+assertions now fail immediately so a later successful command cannot mask failure.
+
+### Host build and verification (no rollout)
+
+Use a clean checkout at the reviewed PR head and a dedicated test `.env` copied from
+`.env.example` with the pins above. Do not source operational credentials or overwrite
+operational image tags. The build script accepts explicit Claude and Codex image
+references; both are necessary to isolate this test from the existing images.
+Run from that checkout's `agents` directory:
+
+```bash
+source_sha=$(git rev-parse HEAD)
+claude_test_image="local/buzz-agent-claude:age3-test-${source_sha}"
+codex_test_image="local/buzz-agent-codex:age3-test-${source_sha}"
+./scripts/build-and-smoke.sh "$claude_test_image" "$codex_test_image"
+printf 'source SHA: %s\n' "$source_sha"
+docker image inspect --format '{{.Id}} {{json .RepoTags}}' \
+  "$claude_test_image" "$codex_test_image"
+cd ..
+node --test agents/docker/*.test.mjs agents/scripts/*.test.mjs
+bash github-apps/test-create-apps.sh
+bash agents/scripts/test-provision-runtime.sh
+```
+
+Expected: direct Codex 0.163.0, package 2.2.2, ACP-selected Codex 0.160.1,
+`Container entrypoint smoke tests passed`, gateway provisioning tests passed, and
+all Node/shell suites pass. Record source SHA, actual image IDs, command exit codes
+and sanitized summaries in the PR. The runtime provisioning shell suite needs a
+trusted host with sudo/ownership support; the App shell suite needs `gh`. No Docker
+CLI/socket is available in the developer container, so image build, full Docker
+smoke, gateway provisioning and host ownership tests must be run on the host.
+Top-level package pins do not lock all transitive npm dependencies; a change in the
+adapter's resolved Codex version deliberately fails smoke pending review. Preserve
+the tested image ID rather than treating a future rebuild as identical.
+
+### Live acceptance gap and rollout gate
+
+The offline checks do not complete AGE #3's operational acceptance criteria.
+Under a separate owner-approved rollout, record the previous image IDs and source
+SHA before recreation; run preflight and verify all three personas reconnect to Buzz.
+In a fresh authorized session verify native Kaneo and GitHub Gateway tools together,
+a Kaneo read, `github_gateway_identity`, and the assigned repository read. Record
+sanitized evidence without credential contents. Check logs/config non-disclosure,
+and verify a real session/inference path. Do not create jobs, rotate credentials,
+restart services or perform GitHub write smoke merely to complete this PR.
+
+### Rollback to 0.154.0 / 1.12.0
+
+Before any approved rollout, retain the previous immutable image ID (and a retained
+rollback tag or digest), previous source SHA, version settings, and whether CODEX_PATH
+was absent or explicitly configured. Record IDs without dumping container environments:
+
+```bash
+previous_container=$(docker compose ps -q developer-a)
+docker inspect --format '{{.Image}}' "$previous_container"
+docker image inspect --format '{{.Id}} {{json .RepoTags}}' \
+  local/buzz-agent-codex:0.154.0
+```
+
+Restore `AGENT_CODEX_VERSION=0.154.0` and `AGENT_CODEX_ACP_VERSION=1.12.0` in the
+approved host configuration. Restore the previous CODEX_PATH state: normally remove
+any experimental override from Compose/service configuration and unset it in the host
+shell; if previously intentional, restore that exact approved path and verify it.
+Unsetting the shell alone does not remove an override embedded in an image/container.
+Use a host-only Compose override to select the **recorded previous image ID/digest**
+for developer-a, then recreate only the affected service after owner approval. Do not
+assume a mutable `0.154.0` tag still points to the saved image.
+
+If the previous image is unavailable, rebuild the old source revision (baseline
+`d263b8aeab34773535e81c18962bcecab74cd4fd`) with 0.154.0/1.12.0 under a separate
+rollback test tag and validate before selecting it. Use that revision's smoke script
+and Node suite against the retained/rebuilt image; the new 2.2.2-specific `cli -V`
+check is not a promise about the 1.12.0 CLI. Confirm direct `codex --version`, read
+1.12.0 from installed `package.json`, and rerun entrypoint/native MCP/non-disclosure
+checks. After approved recreation, repeat preflight, Buzz responses and same-session
+Kaneo/Gateway read checks. Preserve home/credential volumes; do not rotate or delete
+authentication material as part of version rollback.
 
 ## 6. 에이전트 대화 컨텍스트 초기화
 

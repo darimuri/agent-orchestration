@@ -54,7 +54,7 @@ for command_name in docker flock jq mktemp node sudo; do
 done
 node_path="$(command -v node)"
 
-image="local/buzz-agent-codex:${AGENT_CODEX_VERSION:-0.154.0}"
+image="local/buzz-agent-codex:${AGENT_CODEX_VERSION:-0.163.0}"
 docker image inspect "${image}" >/dev/null 2>&1 \
   || die "required image is missing: ${image}"
 
