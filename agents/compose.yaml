@@ -83,8 +83,8 @@ services:
         BUZZ_SPRIG_IMAGE: ${AGENT_BUZZ_SPRIG_IMAGE:-ghcr.io/block/buzz-sprig:sha-6530b58@sha256:17facfc7608d8ddb33bc056c9aaba1098f4ef6abe5655702fbfd7584d1f74d76}
         CLAUDE_CODE_VERSION: ${AGENT_CLAUDE_CODE_VERSION:-2.1.278}
         CLAUDE_ACP_VERSION: ${AGENT_CLAUDE_ACP_VERSION:-0.79.0}
-        CODEX_VERSION: ${AGENT_CODEX_VERSION:-0.154.0}
-        CODEX_ACP_VERSION: ${AGENT_CODEX_ACP_VERSION:-1.12.0}
+        CODEX_VERSION: ${AGENT_CODEX_VERSION:-0.163.0}
+        CODEX_ACP_VERSION: ${AGENT_CODEX_ACP_VERSION:-2.2.2}
         KANEO_MCP_VERSION: ${AGENT_KANEO_MCP_VERSION:-0.1.11}
     environment:
       <<: *common-environment
@@ -106,14 +106,14 @@ services:
 
   developer-a:
     <<: *agent-common
-    image: local/buzz-agent-codex:${AGENT_CODEX_VERSION:-0.154.0}
+    image: local/buzz-agent-codex:${AGENT_CODEX_VERSION:-0.163.0}
     build:
       context: .
       dockerfile: docker/Dockerfile.codex
       args:
         BUZZ_SPRIG_IMAGE: ${AGENT_BUZZ_SPRIG_IMAGE:-ghcr.io/block/buzz-sprig:sha-6530b58@sha256:17facfc7608d8ddb33bc056c9aaba1098f4ef6abe5655702fbfd7584d1f74d76}
-        CODEX_VERSION: ${AGENT_CODEX_VERSION:-0.154.0}
-        CODEX_ACP_VERSION: ${AGENT_CODEX_ACP_VERSION:-1.12.0}
+        CODEX_VERSION: ${AGENT_CODEX_VERSION:-0.163.0}
+        CODEX_ACP_VERSION: ${AGENT_CODEX_ACP_VERSION:-2.2.2}
         KANEO_MCP_VERSION: ${AGENT_KANEO_MCP_VERSION:-0.1.11}
     environment:
       <<: *common-environment
@@ -143,8 +143,8 @@ services:
         BUZZ_SPRIG_IMAGE: ${AGENT_BUZZ_SPRIG_IMAGE:-ghcr.io/block/buzz-sprig:sha-6530b58@sha256:17facfc7608d8ddb33bc056c9aaba1098f4ef6abe5655702fbfd7584d1f74d76}
         CLAUDE_CODE_VERSION: ${AGENT_CLAUDE_CODE_VERSION:-2.1.278}
         CLAUDE_ACP_VERSION: ${AGENT_CLAUDE_ACP_VERSION:-0.79.0}
-        CODEX_VERSION: ${AGENT_CODEX_VERSION:-0.154.0}
-        CODEX_ACP_VERSION: ${AGENT_CODEX_ACP_VERSION:-1.12.0}
+        CODEX_VERSION: ${AGENT_CODEX_VERSION:-0.163.0}
+        CODEX_ACP_VERSION: ${AGENT_CODEX_ACP_VERSION:-2.2.2}
         KANEO_MCP_VERSION: ${AGENT_KANEO_MCP_VERSION:-0.1.11}
     environment:
       <<: *common-environment

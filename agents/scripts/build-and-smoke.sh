@@ -13,14 +13,14 @@ fi
 : "${AGENT_BUZZ_SPRIG_IMAGE:=ghcr.io/block/buzz-sprig:sha-6530b58@sha256:17facfc7608d8ddb33bc056c9aaba1098f4ef6abe5655702fbfd7584d1f74d76}"
 : "${AGENT_CLAUDE_CODE_VERSION:=2.1.278}"
 : "${AGENT_CLAUDE_ACP_VERSION:=0.79.0}"
-: "${AGENT_CODEX_VERSION:=0.154.0}"
-: "${AGENT_CODEX_ACP_VERSION:=1.12.0}"
+: "${AGENT_CODEX_VERSION:=0.163.0}"
+: "${AGENT_CODEX_ACP_VERSION:=2.2.2}"
 : "${AGENT_KANEO_MCP_VERSION:=0.1.11}"
 : "${DOCKER_BUILDKIT:=0}"
 export DOCKER_BUILDKIT
 
-readonly claude_image="local/buzz-agent-claude:${AGENT_CLAUDE_CODE_VERSION}"
-readonly codex_image="local/buzz-agent-codex:${AGENT_CODEX_VERSION}"
+readonly claude_image="${1:-local/buzz-agent-claude:${AGENT_CLAUDE_CODE_VERSION}}"
+readonly codex_image="${2:-local/buzz-agent-codex:${AGENT_CODEX_VERSION}}"
 
 docker build \
   --build-arg "BUZZ_SPRIG_IMAGE=${AGENT_BUZZ_SPRIG_IMAGE}" \

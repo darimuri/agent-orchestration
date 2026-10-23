@@ -11,7 +11,16 @@ if [[ -r "${root_dir}/.env" ]]; then
 fi
 
 readonly claude_image="${1:-local/buzz-agent-claude:${AGENT_CLAUDE_CODE_VERSION:-2.1.278}}"
-readonly codex_image="${2:-local/buzz-agent-codex:${AGENT_CODEX_VERSION:-0.154.0}}"
+readonly codex_image="${2:-local/buzz-agent-codex:${AGENT_CODEX_VERSION:-0.163.0}}"
+# No credentials or runtime mounts: verify direct and ACP-selected Codex.
+docker run --rm --network none --read-only \
+  --tmpfs /tmp:rw,nosuid,nodev,size=64m,uid=10001,gid=10001 \
+  --entrypoint node \
+  --mount "type=bind,src=${root_dir}/docker,dst=/test,readonly" \
+  "${codex_image}" /test/codex-runtime-smoke.mjs \
+  "${AGENT_CODEX_VERSION:-0.163.0}" "${AGENT_CODEX_ACP_VERSION:-2.2.2}" \
+  "${AGENT_CODEX_ACP_CODEX_VERSION:-0.160.1}"
+
 readonly host_uid="$(id -u)"
 readonly host_gid="$(id -g)"
 scratch_dir="$(mktemp -d "${root_dir}/.smoke.XXXXXX")"
@@ -82,7 +91,7 @@ docker run "${common_args[@]}" \
   --env ENABLE_GITHUB_GATEWAY_MCP=true \
   --env GITHUB_GATEWAY_MCP_URL=http://github-gateway.example.test:8787/mcp \
   "${claude_image}" \
-  bash -lc '
+  bash -euc '
     test "$(git config --global user.name)" = "Fixture Dispatcher"
     test "$(git config --global user.email)" = "dispatcher@agents.example.test"
     test "$(git config --global user.useConfigOnly)" = true
@@ -105,7 +114,7 @@ docker run "${common_args[@]}" \
       .mcpServers.github_gateway.url == "http://github-gateway.example.test:8787/mcp" and
       .mcpServers.github_gateway.headers.Authorization == "Bearer ${GITHUB_GATEWAY_AGENT_TOKEN}"
     '\'' "${HOME}/.claude.json" >/dev/null
-    ! grep -Fq "test-gateway-agent-token-that-is-never-written-to-config" "${HOME}/.claude.json"
+    if grep -Fq "test-gateway-agent-token-that-is-never-written-to-config" "${HOME}/.claude.json"; then exit 1; fi
   '
 
 docker run "${common_args[@]}" \
@@ -116,7 +125,7 @@ docker run "${common_args[@]}" \
   --env ENABLE_GITHUB_GATEWAY_MCP=true \
   --env GITHUB_GATEWAY_MCP_URL=http://github-gateway.example.test:8787/mcp \
   "${claude_image}" \
-  bash -lc '
+  bash -euc '
     test "$(git config --global user.name)" = "Fixture Reviewer"
     test "$(git config --global user.email)" = "reviewer@agents.example.test"
     test "$(git config --global user.useConfigOnly)" = true
@@ -132,7 +141,7 @@ docker run "${common_args[@]}" \
       .mcpServers.github_gateway.url == "http://github-gateway.example.test:8787/mcp" and
       .mcpServers.github_gateway.headers.Authorization == "Bearer ${GITHUB_GATEWAY_AGENT_TOKEN}"
     '\'' "${HOME}/.claude.json" >/dev/null
-    ! grep -Fq "test-gateway-agent-token-that-is-never-written-to-config" "${HOME}/.claude.json"
+    if grep -Fq "test-gateway-agent-token-that-is-never-written-to-config" "${HOME}/.claude.json"; then exit 1; fi
   '
 
 docker run "${common_args[@]}" \
@@ -143,7 +152,7 @@ docker run "${common_args[@]}" \
   --env ENABLE_GITHUB_GATEWAY_MCP=true \
   --env GITHUB_GATEWAY_MCP_URL=http://github-gateway.example.test:8787/mcp \
   "${codex_image}" \
-  bash -lc '
+  bash -euc '
     test "$(git config --global user.name)" = "Fixture Developer"
     test "$(git config --global user.email)" = "developer@agents.example.test"
     test "$(git config --global user.useConfigOnly)" = true
@@ -162,14 +171,19 @@ docker run "${common_args[@]}" \
     grep -Fq "[mcp_servers.kaneo]" "${CODEX_HOME}/config.toml"
     grep -Fq "[mcp_servers.github_gateway]" "${CODEX_HOME}/config.toml"
     grep -Fq '\''bearer_token_env_var = "GITHUB_GATEWAY_AGENT_TOKEN"'\'' "${CODEX_HOME}/config.toml"
-    ! grep -Fq "test-gateway-agent-token-that-is-never-written-to-config" "${CODEX_HOME}/config.toml"
-    codex mcp list --json | jq -e '\''
+    if grep -Fq "test-gateway-agent-token-that-is-never-written-to-config" "${CODEX_HOME}/config.toml"; then exit 1; fi
+    set -o pipefail
+    check_mcp_registration() {
+    jq -e '\''
       length == 2 and
       (map(.name) | sort) == ["github_gateway", "kaneo"] and
       (.[] | select(.name == "github_gateway") |
         .transport.type == "streamable_http" and
         .transport.bearer_token_env_var == "GITHUB_GATEWAY_AGENT_TOKEN")
     '\'' >/dev/null
+    }
+    codex mcp list --json | check_mcp_registration
+    codex-acp cli mcp list --json | check_mcp_registration
   '
 
 printf 'Container entrypoint smoke tests passed.\n'
