@@ -21,6 +21,8 @@ RUN apt-get update \
 
 COPY --from=buzz-runtime /usr/local/bin/sprig /usr/local/bin/sprig
 COPY docker/agent-entrypoint.sh /usr/local/bin/agent-entrypoint
+COPY docker/bounded-agent-entrypoint.sh /usr/local/bin/bounded-agent-entrypoint
+COPY docker/check-state-storage.mjs /usr/local/bin/check-state-storage.mjs
 COPY docker/git-identity.mjs /usr/local/bin/git-identity.mjs
 COPY docker/generate-mcp-config.mjs /usr/local/libexec/generate-mcp-config.mjs
 COPY docker/kaneo-mcp-safe-proxy.mjs /usr/local/libexec/kaneo-mcp-safe-proxy.mjs
@@ -34,7 +36,7 @@ RUN groupadd --gid 10001 agent \
     && ln -s sprig /usr/local/bin/git-credential-nostr \
     && ln -s sprig /usr/local/bin/git-sign-nostr \
     && ln -s /usr/local/libexec/kaneo-mcp-safe-proxy.mjs /usr/local/bin/kaneo-mcp-safe-proxy \
-    && chmod 0755 /usr/local/bin/agent-entrypoint /usr/local/libexec/*.mjs \
+    && chmod 0755 /usr/local/bin/agent-entrypoint /usr/local/bin/bounded-agent-entrypoint /usr/local/libexec/*.mjs \
     && mkdir -p /workspace /run/agent/prompts /run/agent/credentials \
        /home/agent/.agent /home/agent/.cache /home/agent/.config /home/agent/.codex \
     && chown -R agent:agent /workspace /home/agent
@@ -50,5 +52,5 @@ ENV HOME=/home/agent \
 USER agent
 WORKDIR /workspace
 
-ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/agent-entrypoint"]
+ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/bounded-agent-entrypoint"]
 CMD ["buzz-acp"]
