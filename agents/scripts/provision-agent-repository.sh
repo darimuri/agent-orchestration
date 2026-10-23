@@ -3,6 +3,8 @@ set -euo pipefail
 
 root_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 repository_root="$(cd "${root_dir}/.." && pwd)"
+# Shared independent-clone flow; the manual fallback retains its host-only scope.
+source "${root_dir}/scripts/repository-clone.sh"
 host_home="${HOME}"
 repository="${1:-}"
 requested_ref="${2:-}"
@@ -148,7 +150,7 @@ provision_clone() {
   fi
 
   # Keep local source objects independent before changing clone ownership.
-  git clone --no-hardlinks --branch "${requested_ref}" "${repository_url}" "${staging}"
+  clone_independent_repository "${repository_url}" "${requested_ref}" "${staging}"
   as_root mv "${staging}" "${destination}"
   as_root chown -R "${agent_uid}:${agent_uid}" "${destination}"
   printf 'Provisioned %s clone: %s\n' "${agent_name}" "${destination}"

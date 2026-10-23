@@ -676,3 +676,11 @@ bash github-apps/test-create-apps.sh
 
 These commands assume the repository root. Run them alongside the existing full
 Docker smoke suite; see the handoff guide for prerequisites and limitations.
+
+### Job-authorized workspace request adapter (draft)
+
+See [WORKSPACE_PROVISIONER.md](WORKSPACE_PROVISIONER.md) for the bounded host-only
+request contract, required live Gateway verifier integration, strict path/checkout
+checks, shared lock and audit behavior, fixture tests and host acceptance gates.
+The existing manual provisioner remains a host-only fallback. No endpoint, runtime
+change, credential provisioning or rollout is installed by this source change.
