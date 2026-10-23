@@ -75,6 +75,10 @@ services:
 
   dispatcher-planner:
     <<: *agent-common
+    cpus: ${DISPATCHER_CPUS:-1.0}
+    mem_limit: ${DISPATCHER_MEM_LIMIT:-2g}
+    # Equal memory + swap total means no container swap.
+    memswap_limit: ${DISPATCHER_MEM_LIMIT:-2g}
     image: ${DISPATCHER_IMAGE:-local/buzz-agent-claude:2.1.278}
     build:
       context: .
@@ -89,6 +93,7 @@ services:
     environment:
       <<: *common-environment
       AGENT_PROVIDER: ${DISPATCHER_PROVIDER:-claude}
+      AGENT_STATE_CAPACITY_BYTES: ${DISPATCHER_STATE_BYTES:-536870912}
       AGENT_ROLE: dispatcher-planner
       AGENT_ROLE_PROMPT: /run/agent/prompts/DISPATCHER_PLANNER.md
       BUZZ_ACP_MODEL: ${DISPATCHER_MODEL:-claude-sonnet-5}
@@ -102,10 +107,18 @@ services:
       - ./prompts:/run/agent/prompts:ro
       - ${DISPATCHER_CREDENTIALS_DIR:?set DISPATCHER_CREDENTIALS_DIR}:/run/agent/credentials:ro
       - ${DISPATCHER_WORKSPACE:?set DISPATCHER_WORKSPACE}:/workspace:ro
-      - dispatcher-state:/home/agent
+      - type: bind
+        source: ${AGENT_RUNTIME_ROOT:?set AGENT_RUNTIME_ROOT}/state-storage/dispatcher-planner
+        target: /home/agent
+        bind:
+          create_host_path: false
 
   developer-a:
     <<: *agent-common
+    cpus: ${DEVELOPER_CPUS:-4.0}
+    mem_limit: ${DEVELOPER_MEM_LIMIT:-8g}
+    # Equal memory + swap total means no container swap.
+    memswap_limit: ${DEVELOPER_MEM_LIMIT:-8g}
     image: local/buzz-agent-codex:${AGENT_CODEX_VERSION:-0.163.0}
     build:
       context: .
@@ -118,6 +131,7 @@ services:
     environment:
       <<: *common-environment
       AGENT_PROVIDER: codex
+      AGENT_STATE_CAPACITY_BYTES: ${DEVELOPER_STATE_BYTES:-2147483648}
       AGENT_ROLE: developer
       AGENT_ROLE_PROMPT: /run/agent/prompts/DEVELOPER.md
       BUZZ_ACP_MODEL: ${DEVELOPER_MODEL:-gpt-5.3-codex}
@@ -131,10 +145,18 @@ services:
       - ./prompts:/run/agent/prompts:ro
       - ${DEVELOPER_CREDENTIALS_DIR:?set DEVELOPER_CREDENTIALS_DIR}:/run/agent/credentials:ro
       - ${DEVELOPER_WORKSPACE:?set DEVELOPER_WORKSPACE}:/workspace:rw
-      - developer-state:/home/agent
+      - type: bind
+        source: ${AGENT_RUNTIME_ROOT:?set AGENT_RUNTIME_ROOT}/state-storage/developer-a
+        target: /home/agent
+        bind:
+          create_host_path: false
 
   reviewer-a:
     <<: *agent-common
+    cpus: ${REVIEWER_CPUS:-2.0}
+    mem_limit: ${REVIEWER_MEM_LIMIT:-4g}
+    # Equal memory + swap total means no container swap.
+    memswap_limit: ${REVIEWER_MEM_LIMIT:-4g}
     image: ${REVIEWER_IMAGE:-local/buzz-agent-claude:2.1.278}
     build:
       context: .
@@ -149,6 +171,7 @@ services:
     environment:
       <<: *common-environment
       AGENT_PROVIDER: ${REVIEWER_PROVIDER:-claude}
+      AGENT_STATE_CAPACITY_BYTES: ${REVIEWER_STATE_BYTES:-1073741824}
       AGENT_ROLE: reviewer
       AGENT_ROLE_PROMPT: /run/agent/prompts/REVIEWER.md
       BUZZ_ACP_MODEL: ${REVIEWER_MODEL:-claude-opus-5}
@@ -162,9 +185,8 @@ services:
       - ./prompts:/run/agent/prompts:ro
       - ${REVIEWER_CREDENTIALS_DIR:?set REVIEWER_CREDENTIALS_DIR}:/run/agent/credentials:ro
       - ${REVIEWER_WORKSPACE:?set REVIEWER_WORKSPACE}:/workspace:ro
-      - reviewer-state:/home/agent
-
-volumes:
-  dispatcher-state:
-  developer-state:
-  reviewer-state:
+      - type: bind
+        source: ${AGENT_RUNTIME_ROOT:?set AGENT_RUNTIME_ROOT}/state-storage/reviewer-a
+        target: /home/agent
+        bind:
+          create_host_path: false

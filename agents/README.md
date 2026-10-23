@@ -18,7 +18,8 @@ tag and manifest-list digest; they are not compiled separately in every image.
 Prompts and credentials are deliberately absent from the image. Compose mounts
 `prompts/` and one credential directory per agent read-only. The entrypoint copies
 only provider runtime state that must be writable into the agent's private `/home/agent`
-volume.
+filesystem. HOME now uses bounded persistent ext4 loopback storage, not the old
+unlimited named volumes; see [resource limits and migration](RESOURCE_LIMITS.md).
 
 The default host runtime root is `${HOME}/buzz-agents`. Override `AGENT_RUNTIME_ROOT`
 when the Docker host should store agent data elsewhere. Every managed runtime path must
@@ -26,6 +27,10 @@ be a canonical strict descendant of that root. GitHub App credentials use the se
 `GITHUB_GATEWAY_CREDENTIALS_BASE_DIR` boundary. Provisioning rejects protected,
 symlinked, overlapping, and repository-checkout paths before any recursive ownership
 or mode change.
+
+> Before starting this revision, complete the separate approved persistent HOME
+> prepare/migration in [RESOURCE_LIMITS.md](RESOURCE_LIMITS.md). The existing runtime
+> provisioner below does not migrate state volumes or mount loop filesystems.
 
 ## Automated host provisioning
 
@@ -550,7 +555,7 @@ buzz messages send \
 | Claude/Codex ACP 대화와 tool-call transcript | 새 session 생성 |
 | Buzz message와 서명된 audit history | 유지 |
 | Workspace file, Git 상태와 일부만 반영된 변경 | 유지 |
-| `/home/agent` named volume과 provider runtime state | 유지 |
+| `/home/agent` bounded persistent filesystem과 provider runtime state | 유지 |
 | `buzz-acp`가 주입하는 최근 thread/DM message | 설정된 개수까지 다시 주입 |
 | NIP-AE agent core memory | memory가 활성화돼 있으면 다시 주입 |
 
@@ -597,17 +602,27 @@ Container를 재시작하거나 교체해도 in-memory ACP session은 사라진�
 않는다. 다중 사용자, 비신뢰 workload, 공유 host 또는 상시 무인 운영으로 확대하기
 전에 아래 후속 issue를 완료하고 이 예외를 제거해야 한다.
 
-### Resource hard limit 부재
+### Resource limits and persistent HOME
 
-현재 Compose는 PID, `/tmp` tmpfs와 Docker log 크기만 제한한다. CPU, process memory와
-`/home/agent` named volume에는 hard limit 또는 quota가 없으므로 runaway build/test가
-host 자원을 고갈시킬 수 있다.
+Compose enforces role-specific CPU/memory ceilings with swap disabled.
 
-- 다른 중요 workload와 host를 공유하지 않는다.
-- 무인 상태에서 비신뢰 build/test를 실행하지 않고 host resource를 직접 감시한다.
-- 공유 host 또는 production 전환 전에
-  [issue #5](https://github.com/darimuri/k8s-test/issues/5)의 CPU/memory limit과 state
-  storage quota를 적용한다.
+| Service | CPU | Memory (swap disabled) | Persistent HOME image |
+|---|---:|---:|---:|
+| dispatcher-planner | 1.0 | 2 GiB | 512 MiB |
+| developer-a | 4.0 | 8 GiB | 2 GiB |
+| reviewer-a | 2.0 | 4 GiB | 1 GiB |
+
+Override the role's CPUS, MEM_LIMIT and STATE_BYTES in .env before preparing storage.
+[RESOURCE_LIMITS.md](RESOURCE_LIMITS.md) explains the measured sizing basis, rejected
+tmpfs alternative, idempotent host prepare/preflight, stopped-state migration, rollback,
+disposable exhaustion tests and monitoring. HOME persists across restarts, including
+the Dispatcher handoff journal. The entrypoint rejects unbounded or tmpfs HOME under
+Compose. Host loop mounts must be ready before container creation after reboot.
+
+This does not quota the Developer's separate writable workspace or bound host-wide
+I/O. Shared-host/unattended use still requires workspace quotas, real cgroup/exhaustion
+verification, restart/journal acceptance and reviewed boot ordering. No rollout is
+automatically performed by this change.
 
 ## Security boundaries
 
@@ -648,9 +663,9 @@ require separate verification. The example mapping contains test identities only
 owner-only Kaneo role setup, native MCP/Buzz execution and crash reconciliation.
 The Dispatcher uses `scripts/dispatcher-handoff.mjs` to persist each write intent
 before executing it and records success receipts afterward. A pending intent blocks
-automatic retransmission. Its private journal lives in the persistent agent home;
-no additional service, runtime setting, credential or permission change is needed
-for the helper itself. Live role application remains a separate owner action.
+automatic retransmission. Its private journal lives in the bounded persistent agent home. Host state filesystems
+must be provisioned and mounted as described in [RESOURCE_LIMITS.md](RESOURCE_LIMITS.md);
+the helper itself needs no credential or permission change. Live role application remains a separate owner action.
 
 Run the local suites with:
 
