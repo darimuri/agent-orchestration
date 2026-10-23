@@ -123,6 +123,10 @@ function verifyClone(dest, url, sha, hostUid, staged = false) {
   if (git(dest, ['rev-parse', 'HEAD^{commit}']) !== sha ||
       git(dest, ['rev-parse', '--is-bare-repository']) !== 'false') fail('SHA');
   if (/^160000 /m.test(git(dest, ['ls-files', '--stage']))) fail('CLONE_LAYOUT');
+  // Status honors assume-unchanged (lowercase -v tags) and skip-worktree
+  // (S/s tags). Reject either flag without clearing it or refreshing the index.
+  // NUL records keep filenames containing newlines from masquerading as tags.
+  if (git(dest, ['ls-files', '-v', '-z']).split('\0').some(entry => /^[a-zS] /.test(entry))) fail('DIRTY');
   if (git(dest, ['status', '--porcelain=v1', '--untracked-files=all', '--ignored', '--ignore-submodules=none'])) fail('DIRTY');
   return true;
 }

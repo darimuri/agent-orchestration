@@ -125,7 +125,8 @@ The job ID is durably bound to requester/repository/base before staging. A confl
 reuse fails closed. All existing destinations are preflighted before clone staging
 and rechecked before any publication. Only clean full clones with the exact
 credential-free origin and exact HEAD are reused. Tracked, staged, untracked and
-ignored dirt, wrong origin/SHA, includes/worktree extensions and object alternates
+ignored dirt, index assume-unchanged/skip-worktree flags (including sparse
+checkouts), wrong origin/SHA, includes/worktree extensions and object alternates
 fail closed. Git optional locks are disabled: read-only checks must not refresh the
 index. Git and config parsing on existing agent-owned clones run under their owner
 UID, not root, with a minimal environment that excludes host authentication. Existing

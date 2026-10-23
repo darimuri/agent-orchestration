@@ -248,3 +248,32 @@ test('shared helper preserves manual fallback checkout without a pinned SHA', t 
   assert.equal(run(actualGit, ['-C', destination, 'rev-parse', 'HEAD']), f.request.baseSha);
   assert.equal(run(actualGit, ['-C', destination, 'symbolic-ref', '--short', 'HEAD']), 'main');
 });
+
+for (const flag of ['assume-unchanged', 'skip-worktree']) {
+  test(`rejects ${flag} hiding tracked modifications without changing index or worktrees`, t => {
+    const f = fixture(t); f.invoke();
+    const dest = f.destinations[2], index = path.join(dest, '.git/index');
+    run(actualGit, ['-C', dest, 'update-index', `--${flag}`, '--', 'README']);
+    fs.writeFileSync(path.join(dest, 'README'), 'hidden tracked modification\n');
+    // Reproduce the bypass independently: status is empty while tracked content
+    // differs from the approved commit. Disable optional index refresh writes.
+    assert.equal(run(actualGit, ['-C', dest, 'status', '--porcelain=v1'],
+      { env: { ...process.env, GIT_OPTIONAL_LOCKS: '0' } }), '');
+    assert.notEqual(fs.readFileSync(path.join(dest, 'README'), 'utf8'),
+      run(actualGit, ['-C', dest, 'show', 'HEAD:README']) + '\n');
+    const before = f.destinations.map(snapshot), indexBytes = fs.readFileSync(index);
+    const indexStat = fs.statSync(index, { bigint: true });
+    const receipts = new Set(fs.readdirSync(f.config.stateDirectory));
+    rejects(f.invoke, 'DIRTY');
+    assert.deepEqual(fs.readFileSync(index), indexBytes);
+    const afterStat = fs.statSync(index, { bigint: true });
+    for (const key of ['ino', 'size', 'mtimeNs', 'ctimeNs']) assert.equal(afterStat[key], indexStat[key]);
+    assert.deepEqual(f.destinations.map(snapshot), before);
+    const results = fs.readdirSync(f.config.stateDirectory)
+      .filter(n => n.endsWith('.result.json') && !receipts.has(n))
+      .map(n => JSON.parse(fs.readFileSync(path.join(f.config.stateDirectory, n), 'utf8')));
+    assert.equal(results.length, 1);
+    assert.equal(results[0].result, 'failed');
+    assert.equal(results[0].error, 'DIRTY');
+  });
+}
