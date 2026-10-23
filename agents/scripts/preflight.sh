@@ -86,6 +86,11 @@ if (( EUID != 0 )); then
   exit 1
 fi
 
+# Fail before checking credential paths if persistent HOME storage is absent/unbounded.
+node "${root_dir}/scripts/state-storage.mjs" check "${AGENT_RUNTIME_ROOT:?set AGENT_RUNTIME_ROOT}" \
+  "${DISPATCHER_STATE_BYTES:-536870912}" "${DEVELOPER_STATE_BYTES:-2147483648}" \
+  "${REVIEWER_STATE_BYTES:-1073741824}"
+
 stat_uid() {
   if stat -c '%u' "$1" >/dev/null 2>&1; then
     stat -c '%u' "$1"

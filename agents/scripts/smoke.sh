@@ -83,6 +83,16 @@ common_args=(
   --env ENABLE_NATIVE_MCP=true
 )
 
+# A missing bounded persistent HOME must fail before credential loading.
+if docker run "${common_args[@]}" \
+  --env AGENT_STATE_CAPACITY_BYTES=536870912 \
+  --env AGENT_ROLE_PROMPT=/run/agent/prompts/DEVELOPER.md \
+  "${codex_image}" true >"${scratch_dir}/state-negative.log" 2>&1; then
+  printf 'Unbounded/tmpfs HOME unexpectedly passed startup guard.\n' >&2
+  exit 1
+fi
+grep -q 'bounded persistent HOME is required' "${scratch_dir}/state-negative.log"
+
 docker run "${common_args[@]}" \
   --env AGENT_PROVIDER=claude \
   --mount "type=bind,src=${scratch_dir}/dispatcher-planner,dst=/run/agent/credentials,readonly" \

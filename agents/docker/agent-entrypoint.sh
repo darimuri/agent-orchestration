@@ -51,6 +51,13 @@ copy_private_file() {
 [[ -n "${BUZZ_RELAY_URL:-}" ]] || die "BUZZ_RELAY_URL is required"
 [[ -n "${BUZZ_ACP_AGENT_OWNER:-}" ]] || die "BUZZ_ACP_AGENT_OWNER is required"
 
+# Compose requires bounded persistent HOME; check before copying any credentials.
+# Credential-free image smoke without this Compose-only variable keeps its tmpfs HOME.
+if [[ -n "${AGENT_STATE_CAPACITY_BYTES:-}" ]]; then
+  node "$(dirname "${BASH_SOURCE[0]}")/check-state-storage.mjs" \
+    "${HOME}" "${AGENT_STATE_CAPACITY_BYTES}" || die "bounded persistent HOME is required"
+fi
+
 # A missing/invalid mounted identity must not fall back to persistent HOME state.
 node "$(dirname "${BASH_SOURCE[0]}")/git-identity.mjs" apply \
   "${credentials_dir}/gitconfig" "${HOME}/.gitconfig" "${AGENT_ROLE:-}" \

@@ -8,6 +8,12 @@ host_gid="$(id -g)"
 scratch_dir="$(mktemp -d)"
 
 cleanup() {
+  if [[ -d "${scratch_dir}/agent-runtime/state-storage" ]]; then
+    as_root node "${root_dir}/scripts/state-storage.mjs" unmount "${scratch_dir}/agent-runtime" 67108864 67108864 67108864 || {
+      printf "State cleanup blocked; fixture preserved: %s\n" "${scratch_dir}" >&2
+      return 1
+    }
+  fi
   if (( EUID == 0 )); then
     chown -R "${host_uid}:${host_gid}" "${scratch_dir}" >/dev/null 2>&1 || true
   else
@@ -49,6 +55,9 @@ AGENT_WORKSPACE_ORGANIZATION=test-org
 AGENT_WORKSPACE_GIT_URL_TEMPLATE=${scratch_dir}/sources/{owner}/{repository}.git
 AGENT_WORKSPACE_DEFAULT_REF=main
 AGENT_RUNTIME_ROOT=${scratch_dir}/agent-runtime
+DISPATCHER_STATE_BYTES=67108864
+DEVELOPER_STATE_BYTES=67108864
+REVIEWER_STATE_BYTES=67108864
 AGENT_GIT_IDENTITY_MANIFEST=${scratch_dir}/git-identities.json
 XDG_RUNTIME_DIR=${scratch_dir}/run
 GITHUB_GATEWAY_ALLOWED_OWNERS=test-org
@@ -188,6 +197,7 @@ for app_slug in control-app developer-app reviewer-app; do
   as_root install -m 0600 -o 1000 -g 1000 "${credential_fixture}" "${app_dir}/app.json"
   as_root install -m 0600 -o 1000 -g 1000 "${credential_fixture}" "${app_dir}/private-key.pem"
 done
+as_root node "${root_dir}/scripts/state-storage.mjs" prepare "${scratch_dir}/agent-runtime" 67108864 67108864 67108864
 as_root "${root_dir}/scripts/preflight.sh" "${env_file}" >/dev/null
 
 expect_preflight_failure 'stale gateway image pin' "${stale_gateway_env}"

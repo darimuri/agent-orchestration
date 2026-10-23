@@ -1,0 +1,41 @@
+x-fixture: &fixture
+  image: ${RESOURCE_TEST_IMAGE:-local/buzz-agent-codex:0.163.0}
+  user: "10001:10001"
+  entrypoint: ["node", "/test/tests/resources/probe.mjs"]
+  restart: "no"
+  read_only: true
+  network_mode: none
+  cap_drop: [ALL]
+  security_opt: [no-new-privileges:true]
+  pids_limit: 32
+  cpus: 0.25
+  mem_limit: 256m
+  memswap_limit: 256m
+  tmpfs:
+    - /tmp:rw,noexec,nosuid,nodev,size=16m,uid=10001,gid=10001
+  volumes:
+    - type: bind
+      source: ${RESOURCE_TEST_SOURCE:?test source required}
+      target: /test
+      read_only: true
+      bind:
+        create_host_path: false
+services:
+  probe:
+    <<: *fixture
+    command: [probe]
+    volumes:
+      - type: bind
+        source: ${RESOURCE_TEST_SOURCE:?test source required}
+        target: /test
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${RESOURCE_TEST_ROOT:?disposable root required}/state-storage/developer-a
+        target: /home/agent
+        bind:
+          create_host_path: false
+  oom:
+    <<: *fixture
+    command: [oom]

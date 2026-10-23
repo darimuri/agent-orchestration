@@ -71,6 +71,10 @@ node agents/scripts/dispatcher-handoff.mjs \
   "$HOME/.local/state/dispatcher-handoffs" < request.json
 ```
 
+The Compose HOME is a bounded persistent ext4 filesystem; host prepare/migration and
+reboot mount ordering are required as described in [RESOURCE_LIMITS.md](RESOURCE_LIMITS.md).
+Do not replace it with tmpfs or start a new empty journal after losing a mount.
+
 Every invocation uses the SAME journal directory and unchanged assignment. Only one
 Dispatcher instance may own a job. Keep the directory private (0700), on persistent
 local storage with working exclusive creation, rename and fsync; do not put it in
