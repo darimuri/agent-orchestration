@@ -49,7 +49,7 @@ function parse(raw) {
     try { length = typedArrayLength.call(raw); } catch { reject('invalid_input'); }
     if (!Buffer.isBuffer(raw) || Object.getPrototypeOf(raw) !== Buffer.prototype) reject('invalid_input');
     if (length > MAX_BYTES) reject('bounds');
-    if (Object.getOwnPropertySymbols(raw).length || Object.keys(raw).length !== length) reject('invalid_input');
+    if (Object.getOwnPropertySymbols(raw).length || Reflect.ownKeys(raw).length !== length) reject('invalid_input');
     try { text = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(raw); }
     catch { reject('invalid_encoding'); }
   }

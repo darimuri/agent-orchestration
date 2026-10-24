@@ -218,3 +218,17 @@ test('Buffer length accessors and proxy traps cannot execute during raw-input va
   for (const raw of [buffer, proxy]) assert.equal(safe(lintEvidenceIndex(raw, cutoff)).structure, 'INVALID');
   assert.equal(invoked, false);
 });
+
+test('even non-enumerable properties on otherwise valid JSON Buffers are rejected before decoding', () => {
+  let invoked = false;
+  for (const descriptor of [{ value: true }, { get() { invoked = true; throw Error(canary); } }]) {
+    const raw = Buffer.from(JSON.stringify(index()));
+    Object.defineProperty(raw, 'verified', descriptor);
+    const output = safe(lintEvidenceIndex(raw, cutoff));
+    assert.equal(output.structure, 'INVALID'); assert.deepEqual(output.codes, ['invalid_input']);
+  }
+  const lengthGetter = Buffer.from(JSON.stringify(index()));
+  Object.defineProperty(lengthGetter, 'length', { get() { invoked = true; throw Error(canary); } });
+  assert.deepEqual(safe(lintEvidenceIndex(lengthGetter, cutoff)).codes, ['invalid_input']);
+  assert.equal(invoked, false);
+});
