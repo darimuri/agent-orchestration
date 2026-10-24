@@ -684,3 +684,11 @@ request contract, required live Gateway verifier integration, strict path/checko
 checks, shared lock and audit behavior, fixture tests and host acceptance gates.
 The existing manual provisioner remains a host-only fallback. No endpoint, runtime
 change, credential provisioning or rollout is installed by this source change.
+
+### Host Operator protocol and journal (offline phase 1)
+
+[HOST_OPERATOR.md](HOST_OPERATOR.md) defines the strict request/verifier contract,
+fixed operation descriptors and separate private intent/receipt journal. Disposable
+fixtures cover replay, crash reconciliation, concurrency and needs_user. This adds
+no service, socket, process executor, live Buzz/Kaneo publisher or host privilege;
+live verifier, restricted executor and host acceptance gates remain separate work.
