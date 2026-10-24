@@ -21,8 +21,9 @@ Trusted inputs to the library constructor are an installed reviewed operation
 registry, exact source/dependency binding, owner pubkey, private local journal,
 clock, and authorization/receipt verification adapters. These adapters are ordinary
 in-process functions selected by trusted host code, never request fields. The
-fixtures simulate their verdicts. They do **not** implement cryptographic Buzz
-validation, the live Gateway job ledger or a process termination verifier.
+original phase-1 fixtures simulate their verdicts. The opt-in A1 adapter described
+below adds public signature verification; neither phase supplies the live Gateway
+job ledger or a process termination verifier.
 
 The threat model covers replay, scope substitution, arbitrary command/path/env/mount
 injection, lost responses, concurrent consumers, process crashes, symlink/hardlink
@@ -252,3 +253,146 @@ Remaining gates before any real host operation is reachable:
 Removing these new libraries/docs rolls back phase-1 source only. It must not remove
 journals, alter deployed runtime/credentials/jobs or perform operational rollback.
 The overall Host Operator and its live acceptance remain incomplete after this PR.
+
+## A1: direct-owner public event authentication
+
+`host-operator-auth/owner-event.mjs` now supplies real NIP-01 event ID and
+BIP-340 Schnorr verification, and `authorization.mjs` supplies an opt-in
+`createAuthorizationAdapter` for the unchanged phase-1 journal. This is a library
+with injected host seams, not a live Gateway verifier or Host Operator installation.
+The original phase-1 fake-adapter tests retain their meaning; the new suite uses
+real signatures and the same journal/receipt APIs. There is no runner, polling,
+network provider, CLI, default policy, secret loader or delegated-assignment path.
+Only `status.revision` is admitted by this adapter, and an intent still executes
+nothing. Every `validate.*` request is denied even though v1 retains those registry
+names for future reviewed integrations.
+
+### Signed wire format and fixed bounds
+
+Pass serialized event JSON as a string or UTF-8 Buffer to
+`verifyOwnerEvent(raw, {ownerPubkey, targetPubkey, channelId, threadId, source, now})`.
+It returns `{request, descriptor, signerPubkey, expiresAt}` or throws the fixed
+`authorization_denied` ProtocolError. Raw objects, cached verification booleans,
+extra fields, duplicate keys (including escaped spellings), malformed UTF-8,
+unpaired surrogates and excessive nesting are denied. Every call rebuilds the
+NIP-01 hash from `[0,pubkey,created_at,kind,tags,content]` and verifies the signature;
+there is no verification cache. Public signatures prove integrity/authorship only.
+
+The event has exactly `id,pubkey,created_at,kind,tags,content,sig`. Require kind 9,
+configured owner signer and exactly one of each routing tag:
+`["h",channelId]`, `["p",targetPubkey]`, `["e",threadId,"","root"]`.
+Other bounded tags carry no authorization; additional h/p/e tags, reply targets
+and routing hints in these three security tags are rejected as ambiguous. This
+strict structured command format does not execute conversational Buzz assignments.
+Signed `content` is JSON with exactly:
+
+```json
+{
+  "type": "host-operator.request",
+  "version": 1,
+  "request": {
+    "version": 1,
+    "requestId": "request-one",
+    "taskId": "task-one",
+    "jobId": "job-one",
+    "repository": "test-org/project",
+    "baseRef": "main",
+    "baseSha": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "operationId": "status.revision",
+    "channelId": "00000000-0000-0000-0000-000000000001",
+    "threadId": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+  },
+  "descriptorDigest": "canonical digest of the trusted v1 descriptor",
+  "expiresAt": 1800000600000
+}
+```
+
+The descriptor digest above is an illustrative placeholder, not a valid command.
+The verified envelope ID supplies `authorizationEventId`; embedding it is rejected.
+The source is the trusted reviewed `{repository,baseRef,baseSha,workspaceId,sourceDigest}`
+binding. The request and descriptor digest must match it exactly.
+
+Limits are fixed: event 16 KiB, content 8 KiB, v1 request 4096 bytes, JSON nesting
+16, at most 32 tags of 1–4 strings each and at most 256 UTF-8 bytes per tag string.
+`created_at` is integer epoch seconds, expiry/clock are integer epoch milliseconds;
+future skew is at most 60 seconds, event age at most 10 minutes, signed lifetime
+strictly positive and at most 10 minutes, and expiry must be strictly after now.
+No request may override those bounds or supply executable shell/path/env/mount/argv.
+
+### Trusted synchronous policy composition
+
+Construct `createAuthorizationAdapter` with trusted configuration
+`{ownerPubkey,requesterId,mentionPubkey,targetPubkey,channelId,threadId,source,
+resolveEvent,currentJob,clock}`. `clock` defaults to Date.now. The owner/requester
+and callback mapping is host-pinned, never taken from request text or display names.
+`resolveEvent(eventId)` must return raw event bytes/string. The adapter independently
+checks that the derived request equals the journal request and recomputes the
+trusted descriptor; a resolver cannot substitute another valid event.
+
+The mandatory `currentJob(request, verifiedIdentity, descriptor)` is a synchronous
+host-selected function. Its arguments are detached copies. No live implementation
+is shipped. It must derive facts from the existing authoritative authorization
+source; echoing arguments, a static assignment or a caller-provided `verified=true`
+is not live policy evidence. Promise, missing, unreadable, malformed, inherited,
+accessor or symbol-bearing results deny. The return is a strict DTO of at most
+4096 serialized bytes, **not a Gateway ledger schema**:
+
+| Exact fields | Required value |
+| --- | --- |
+| taskId, jobId, repository, baseRef, baseSha, operationId, channelId, threadId | Exact request binding |
+| requesterId, role, ownerPubkey, mentionPubkey, targetPubkey | Configured owner mapping; role `owner` |
+| workspaceId, sourceDigest, descriptorDigest, requestHash | Reviewed source/descriptor and complete request hashes |
+| enabled, status, requesterMember, ownerAllowed | `true`, `active`, `true`, `true` |
+| allowedOperations | Exactly `["status.revision"]` for this bounded adapter |
+| verifiedAt, expiresAt | Safe integer epoch ms; verification at most 60s old, never future; unexpired job |
+
+These booleans are conclusions of trusted provider code, not self-authenticating
+JSON assertions. The provider must prove owner allowlist, requester membership,
+job/task/operation scope and current enabled/noncompleted/nonrevoked state. A
+Gateway repository read alone does not establish them. Exceptions are sanitized.
+The normalized phase-1 authorization expiry is min(signed expiry, job expiry).
+Missing provider denies; it never issues a user command to expose credentials or
+ledgers. Future integration must establish bounded synchronous freshness without
+blocking network I/O under the journal lock, or separately review an API redesign.
+No atomic transaction with concurrent remote revocation is claimed.
+
+The journal reauthenticates before access and under lock before every new intent;
+A1 reruns event and current-policy checks each time. Completed replay creates no new
+effect, pending remains outcome_unknown, and expired authorization starts nothing.
+`verifyReceipt` remains a separate mandatory authority: an owner request signature
+is never proof of execution, reporting or user completion. Proven historical receipts
+can still reconcile after request expiry; the next intent then denies. The inert
+needs_user fixture and all existing journal schemas/identities remain unchanged.
+No journal migration, reset, nonce database or operational resume is introduced.
+
+### Dependency and verification evidence
+
+Install the scoped locked dependencies using:
+
+```bash
+npm ci --prefix agents/host-operator-auth --ignore-scripts
+node --test agents/scripts/host-operator-auth.test.mjs agents/scripts/host-operator.test.mjs
+node --test agents/docker/*.test.mjs agents/scripts/*.test.mjs
+```
+
+Node >=20.19 is required. The manifest pins `@noble/curves` 2.4.0; the lockfile
+pins its sole dependency `@noble/hashes` 2.4.0 with registry URLs and SHA-512 integrity.
+Only the Schnorr API is imported in production. No signing, wallet or transport API
+is exposed. No lifecycle scripts are used. See the
+[upstream security history](https://github.com/paulmillr/noble-curves#security):
+it reports broad Trail of Bits review at 2.3.0, plus earlier independently scoped
+audits. Those reports do not certify every change in 2.4.0 or this adapter. The
+release/source/lockfile still need independent review; npm audit is an advisory
+lookup, not a cryptographic audit. The tests use the public
+[BIP-340 vector 0](https://github.com/bitcoin/bips/blob/master/bip-0340/test-vectors.csv)
+and deterministic signed command fixtures. The public vector scalar is test-only
+and must never be used for operational identities. Tests need no private live keys.
+
+A1 reduces the simulated owner-signature boundary only. AGE #5 live requester/job
+verification and host-owned workspace migration, immutable reviewed installation,
+resource/process-tree enforcement, root/Docker/systemd/peer authentication, durable
+host storage and live dedicated Buzz/Kaneo reporting/native reconciliation remain
+separate host gates. No new identity, credential, service, permissions or runtime
+is created. C-prime issue #16, rollout and operational rollback remain outside A1.
+Source rollback removes only these A1 modules, dependency, tests and docs; preserve
+all existing journals and receipts and never resume production with fake policy.
