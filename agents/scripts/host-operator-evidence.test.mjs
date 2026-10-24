@@ -219,16 +219,30 @@ test('Buffer length accessors and proxy traps cannot execute during raw-input va
   assert.equal(invoked, false);
 });
 
-test('even non-enumerable properties on otherwise valid JSON Buffers are rejected before decoding', () => {
+test('complete-payload Buffer wrappers reject hidden data/accessors/symbols/proxies without invoking getters', () => {
+  const complete = JSON.stringify(index(true));
+  assert.equal(safe(lintEvidenceIndex(Buffer.from(complete), cutoff)).structure, 'COMPLETE');
   let invoked = false;
-  for (const descriptor of [{ value: true }, { get() { invoked = true; throw Error(canary); } }]) {
-    const raw = Buffer.from(JSON.stringify(index()));
-    Object.defineProperty(raw, 'verified', descriptor);
+  for (const key of ['verified', 'length', 'byteLength', 'byteOffset', 'buffer']) {
+    for (const descriptor of [{ value: true }, { get() { invoked = true; throw Error(canary + '/private/wrapper'); } }]) {
+      const raw = Buffer.from(complete);
+      Object.defineProperty(raw, key, descriptor); // non-enumerable by default
+      const output = safe(lintEvidenceIndex(raw, cutoff));
+      assert.equal(output.structure, 'INVALID'); assert.deepEqual(output.codes, ['invalid_input']);
+    }
+  }
+  const symbol = Buffer.from(complete); Object.defineProperty(symbol, Symbol('verified'), { value: canary });
+  const proxy = new Proxy(Buffer.from(complete), {
+    getPrototypeOf() { invoked = true; throw Error(canary); },
+    ownKeys() { invoked = true; throw Error(canary); },
+    get() { invoked = true; throw Error(canary); },
+  });
+  // The documented API accepts ordinary Buffer, not a general Uint8Array or subclass.
+  const uint8 = new Uint8Array(Buffer.from(complete));
+  const subclass = Buffer.from(complete); Object.setPrototypeOf(subclass, Object.create(Buffer.prototype));
+  for (const raw of [symbol, proxy, uint8, subclass]) {
     const output = safe(lintEvidenceIndex(raw, cutoff));
     assert.equal(output.structure, 'INVALID'); assert.deepEqual(output.codes, ['invalid_input']);
   }
-  const lengthGetter = Buffer.from(JSON.stringify(index()));
-  Object.defineProperty(lengthGetter, 'length', { get() { invoked = true; throw Error(canary); } });
-  assert.deepEqual(safe(lintEvidenceIndex(lengthGetter, cutoff)).codes, ['invalid_input']);
   assert.equal(invoked, false);
 });
