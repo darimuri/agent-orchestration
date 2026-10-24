@@ -464,3 +464,21 @@ Independent exact-head Reviewer/CI and human approval remain separate. No live
 capability, endpoint, runner, validate/reporting, root/Docker/systemd or runtime is
 installed. Reverting only these tests/harness/docs and discarding their scratch rolls
 back A3 source; preserve all operational journals/receipts. Overall AGE #7 is incomplete.
+
+## A4: host acceptance preparation — NOT READY
+
+[HOST_OPERATOR_HOST_ACCEPTANCE.md](HOST_OPERATOR_HOST_ACCEPTANCE.md) records the
+pinned A1/A2/A3 baseline, evidence owners, unresolved inventory and go/no-go rules
+for host installation, administrative ledger writers and journal/storage acceptance.
+It is a documentation-only contract/template. Actual host UID/GID/access, installed
+paths/artifacts, writer source/procedure, storage/latency/risk decisions and live
+event source remain **UNRESOLVED / NOT READY**; no default values are inferred from
+fixtures or existing runtime preflight IDs. Group-read access does not satisfy A2's
+exact ledger file UID/private-mode requirements. The contract preserves separate
+requester/subject/receipt authority and existing journal/receipt history.
+
+A3 conformance remains offline evidence. Neither the contract nor its merge activates
+live event/current-policy processing, execution or native reporting. Future host
+positive/negative acceptance, independent review of evidence and owner authorization
+remain separate. A4 changes no code, tests, dependencies, installer, live ledger,
+capability, job, runtime, credential, container/service or deployment.

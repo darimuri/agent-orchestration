@@ -735,3 +735,12 @@ private diagnostic scratch, successful runs remove it. No operational credential
 are needed. See the linked procedure for offline-cache prerequisites, explicit skip
 semantics outside this harness, remaining gh/Docker/root/CI/review gates and rollback.
 This adds test evidence only; it does not activate Host Operator or complete AGE #7.
+
+### A4 Host Operator host acceptance preparation
+
+The [host acceptance contract](HOST_OPERATOR_HOST_ACCEPTANCE.md) is a documentation-only
+inventory/evidence template with pinned A1/A2/A3 references, evidence owners and
+fail-closed go/no-go rules. Host UID/GID/access, installed paths, administrative writer,
+storage and event source facts remain **UNRESOLVED / NOT READY**. It authorizes no
+installation, live capability or runtime change; A3 offline fixtures do not establish
+host acceptance. Overall AGE #7 remains incomplete.
