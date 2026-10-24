@@ -396,3 +396,71 @@ separate host gates. No new identity, credential, service, permissions or runtim
 is created. C-prime issue #16, rollout and operational rollback remain outside A1.
 Source rollback removes only these A1 modules, dependency, tests and docs; preserve
 all existing journals and receipts and never resume production with fake policy.
+
+## A3: offline two-source admission conformance
+
+The test-only `scripts/check-host-operator-integration.mjs` closes the A2 DTO-only
+compatibility gap by composing the actual A1 signed-event adapter, the actual built
+Gateway `createHostPolicySource`, and the actual journal. It imports no live config,
+starts no service, discovers no operational ledgers and executes no intent. Events
+use the public BIP-340 vector-0 test scalar, the resolver is an ID-indexed raw fixture,
+and receipt verification is a separate positive fixture authority. Private disposable
+agents/jobs files go through the unchanged A2 ownership, ancestry and safe-file checks.
+The execution subject remains distinct from the requesting owner.
+
+Run from a **clean committed** orchestration checkout at the head being reviewed:
+
+```bash
+# Operator-supplied source checkout, not a host request or live ledger path.
+# This exact dependency HEAD/tree is mandatory; a moving main or existing dist is refused.
+gateway_source=/workspace/darimuri/github-app-agent-gateway-age7-a3-source
+orchestration_head=$(git rev-parse HEAD)
+node agents/scripts/check-host-operator-integration.mjs "$gateway_source" "$orchestration_head"
+```
+
+Pinned dependency: `darimuri/github-app-agent-gateway`
+`59fca5e863c99dd44b7d8d0ad762e00f03402517`, tree
+`b1e1430793bcd26b02df9a77aa49a5b5ce16a24b`. Orchestration must descend from A1 merge
+`1b3bc2b41e2767273053e8e03bd89e9d3149d3e1`. The harness checks canonical origins,
+exact heads/trees, clean tracked and untracked source state, and rechecks them after
+validation. Both supplied source roots must be canonical paths. It archives the
+committed sources into private scratch, installs their unchanged locks using
+`npm ci --ignore-scripts --offline --no-audit --no-fund`, runs full Gateway
+`check`, `test`, `build`, then the full orchestration Node suite. It never fetches,
+checks out or installs packages in either supplied source.
+An offline npm cache containing both lockfiles' dependencies is a prerequisite;
+a cache miss is a failure, never a reason to fetch or weaken the pin.
+
+Use an ordinary Linux UID and protected executable scratch. If `/tmp` is `noexec`,
+set `TEST_EXECUTABLE_TMPDIR` to a precreated private mode-0700 executable directory
+under trusted ancestors outside both source checkouts. Only its newly created
+`host-integration-*` child is used. Successful runs remove that child; failed runs
+retain private logs/fixtures there for local investigation. These are synthetic
+fixtures, never operational ledgers or secrets. Review then remove only that scratch
+child. The harness passes a minimal subprocess environment without Buzz credentials,
+NODE_OPTIONS or inherited npm configuration and emits fixed summaries rather than
+raw upstream errors. Its operations are fixed build/test commands, not request-selected
+shell/argv. Existing gh/Docker/Compose/root suites require separate host verification;
+the harness does not claim those or CI passed.
+
+The integration suite covers valid durable intent/complete replay, each pending
+execution/report boundary after reopening, separate receipt authority, event integrity
+and signed scope substitutions, owner/callback/target/task/source/descriptor and
+agent/job binding, missing capability/provider, Promise/error provider, disabled,
+expired/completed/cancelled subjects, atomic revocation before/under lock and before
+later report intents, unsafe/oversized/malformed/unstable files, expiry minima and
+clock units, timeout without termination proof, historical positive receipt after
+expiry/revocation, and canary/hash/path non-disclosure. Only fixed `status.revision`
+requests can reach admission. Without the harness-provided private build, these new
+cross-repository tests explicitly skip in ordinary Node runs; a run with those skips
+is **not** A3 integration evidence. The harness run must report zero skipped tests.
+
+This demonstrates offline composition against pinned real code, not live host policy
+or receipt authority. Immutable installation/artifact verification, trusted UID/path
+and atomic ledger writers, bounded storage/latency, synchronous filesystem stalls,
+nontransactional revocation/ABA, existing dependency advisory assessment, AGE #5,
+executor/process/resource controls and native Buzz/Kaneo receipts remain host gates.
+Independent exact-head Reviewer/CI and human approval remain separate. No live
+capability, endpoint, runner, validate/reporting, root/Docker/systemd or runtime is
+installed. Reverting only these tests/harness/docs and discarding their scratch rolls
+back A3 source; preserve all operational journals/receipts. Overall AGE #7 is incomplete.

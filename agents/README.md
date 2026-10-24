@@ -710,3 +710,28 @@ Do not commit the generated `agents/host-operator-auth/node_modules` directory. 
 to a private executable temporary directory outside source; no live verifier is used.
 See HOST_OPERATOR.md for signature/policy limits, upstream dependency audit scope,
 receipt separation, remaining host-only gates and source rollback rules.
+
+### A3 offline Host Operator integration
+
+The [A3 two-source procedure](HOST_OPERATOR.md#a3-offline-two-source-admission-conformance)
+validates real A1 signed events → pinned real Gateway A2 private-file policy → the
+existing durable journal using disposable fixtures only. From a clean committed
+checkout, supply the exact dependency source and current reviewed head:
+
+```bash
+node agents/scripts/check-host-operator-integration.mjs \
+  /workspace/darimuri/github-app-agent-gateway-age7-a3-source "$(git rev-parse HEAD)"
+```
+
+The Gateway source must be clean at `59fca5e863c99dd44b7d8d0ad762e00f03402517`
+(tree `b1e1430793bcd26b02df9a77aa49a5b5ce16a24b`). Both canonical origins, heads,
+trees and source cleanliness are checked. Unchanged lockfiles install offline with
+lifecycle scripts disabled in private archived build scratch. The harness runs full
+Gateway check/test/build and full orchestration Node tests (including integration).
+It performs no source checkout/fetch, live ledger discovery,
+service startup, intent execution or reporting. On `noexec` `/tmp`, precreate private
+executable scratch outside source and set `TEST_EXECUTABLE_TMPDIR`; failed runs retain
+private diagnostic scratch, successful runs remove it. No operational credentials
+are needed. See the linked procedure for offline-cache prerequisites, explicit skip
+semantics outside this harness, remaining gh/Docker/root/CI/review gates and rollback.
+This adds test evidence only; it does not activate Host Operator or complete AGE #7.
