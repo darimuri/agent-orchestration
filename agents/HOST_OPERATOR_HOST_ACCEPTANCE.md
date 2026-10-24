@@ -209,3 +209,134 @@ runner, arbitrary shell/path/env/mount/argv or validate/delegated execution; roo
 Docker access; AGE #5 provisioning/migration; dedicated reporter credentials/native
 receipt implementation; C-prime #16; job-scope/runtime/container/credential changes;
 Ready transition, approval, merge, deploy or operational rollback execution.
+
+## A5 offline evidence-index lint
+
+The pure [evidence linter](scripts/host-operator-evidence.mjs) checks a compact,
+explicitly supplied sanitized metadata index against the merged A4 contract. It
+opens no referenced evidence, reads no host files, fetches no URLs, executes no
+processes and stores no state. The stdin entrypoint reads only its supplied bytes;
+importing the module consumes no stdin and produces no output. It is not a collector,
+attestation verifier, authorization ledger, `currentJob` provider or journal input.
+All H1–H9 rows above remain **UNRESOLVED / NOT READY**.
+
+`lintEvidenceIndex(raw, asOf)` accepts serialized JSON as a string or ordinary Buffer
+and an explicit nonnegative safe-integer epoch-ms cutoff. Already-parsed objects,
+class instances, accessors, symbol-bearing/extended Buffers and caller verdicts are
+not accepted. The API returns a fixed bounded summary rather than throwing raw
+errors. The caller cutoff and index `asOf` must match; no ambient clock or automatic
+evidence timestamp refresh is used. Whitespace counts toward the byte limit.
+
+### Exact metadata schema and bounds
+
+The root has exactly `version`, `contract`, `asOf`, `references`, `gates`.
+`version` is 1. `contract` has exactly the following literal fields (also exported
+as frozen `CONTRACT`); these identify the **merged A4 baseline**, not an installed
+artifact or the evolving A5 document:
+
+| Field | Required literal |
+| --- | --- |
+| id | `host-operator-host-acceptance-a4` |
+| repository | `darimuri/agent-orchestration` |
+| sourceSha | `60d7f6e857c6139e4b776cf5296720f00c5ebc81` |
+| sourceTree | `500522c773e21c941244fc298fd4a2d28e55222a` |
+| contractBlob | `50cc24f45d9aef2f2422417d737b28c8202e6767` |
+| gatewaySha | `59fca5e863c99dd44b7d8d0ad762e00f03402517` |
+| gatewayTree | `b1e1430793bcd26b02df9a77aa49a5b5ce16a24b` |
+
+`gates` contains exactly one `{id,facts}` object for each H1–H9. Each has exactly
+three `{id,status,references}` facts from the fixed mapping below, in any order.
+These identifiers partition the existing A4 row requirements; they introduce no
+new live acceptance policy or host values. Each fact status is `UNRESOLVED` with an
+empty reference list, or `REFERENCES_SUPPLIED` with 1–4 unique opaque reference IDs.
+No other status, fact, gate or field is accepted.
+
+| A4 row | Required fact identifiers | Scope of the existing requirement |
+| --- | --- | --- |
+| H1 | `installed_set`, `install_boundary`, `source_binding` | Loaded artifacts/dependencies/configuration; protected install; registry/sourceDigest meaning |
+| H2 | `reader_identity`, `private_access`, `agent_exclusion` | Actual UID/GID compatibility; file/ancestor controls; absence of agent/LLM access |
+| H3 | `ledger_custody`, `subject_scope`, `owner_mapping` | Authoritative ledger custody; current subject/job/capability; pinned owner/requester/callback/target/allowlist |
+| H4 | `writer_source`, `atomic_update`, `pair_recovery` | Actual writer source; validated temp/fsync/rename/parent fsync; serialization/partial-pair recovery |
+| H5 | `namespace_storage`, `capacity_durability`, `restart_recovery` | Unique protected journal routing/storage; capacity/fault/durability; restart/stale-lock investigation |
+| H6 | `clock_latency`, `stall_acceptance`, `revocation_acceptance` | Trusted clocks/read measurements; uninterruptible syscall risk; final-read/ABA/whole-host rollback decision |
+| H7 | `raw_event_source`, `event_bounds`, `event_failure_replay` | Exact-ID raw signed source; size/deadline/synchronous seam; unavailable/replay/freshness handling |
+| H8 | `termination_authority`, `reporter_identity`, `receipt_reconciliation` | Executor/process-tree proof; distinct native reporter identity; exact receipt/content/mention/lost-response evidence |
+| H9 | `status_scope`, `advisory_assessment`, `activation_decision` | Exact status-only scope; advisory assessment; independent review/human risk/activation/rollback decisions |
+
+`references` is a list of at most 108 unique definitions, each with exactly these
+fields. Every definition must be used by a fact; a pointer may be shared between
+facts because one protected document may cover multiple claims. Duplicate
+reference definitions/pointers, conflicting custodian/revision/time metadata,
+undefined pointers and unused definitions reject.
+
+| Reference field | Allowed metadata, not independently verified evidence |
+| --- | --- |
+| id | Sanitized opaque label matching `[a-z][a-z0-9_-]{0,31}` |
+| custodian | Named custodian's sanitized label using the same alphabet; not authentication, a new account, or an assigned host identity |
+| revision | Lowercase 40-hex source revision or 64-hex artifact/evidence revision; otherwise `null` |
+| recordedAt | Nonnegative safe-integer epoch ms, no later than the explicit cutoff |
+| reviewBy | Owner-defined validity-policy review deadline, safe-integer epoch ms no earlier than recordedAt; `null` if policy is unknown |
+
+Applicable revision metadata is required for `installed_set`, `source_binding`,
+`writer_source` and `advisory_assessment`. A missing revision there yields
+`revision_missing`; it does not invent an installed revision. A null `reviewBy`
+yields `review_policy_missing`; `reviewBy` at/before the cutoff yields
+`stale_reference`. No universal host-evidence TTL is selected. An invalid/reversed
+interval or future recordedAt is rejected. All revisions/custodians/deadlines are
+untrusted claims; a syntactically valid forged revision is never proof of current
+source, actual custody, install integrity or human acceptance.
+
+Input limits are fixed: 65,536 UTF-8 bytes, nesting depth 8 (root depth 0), decoded
+strings at most 128 UTF-8 bytes, at most 32 keys/object and 108 elements/array before
+schema-specific limits. Reject malformed UTF-8, BOM, lone surrogates, malformed JSON,
+escaped duplicate keys and all unknown/extra fields. Live fact bodies, paths, URLs,
+commands, env/mount/argv, attachments, token hashes, `verified`/`ready` flags and
+caller-selected limits have no schema slot. References are never dereferenced.
+Only synthetic sanitized metadata belongs in test fixtures; do not paste raw
+private evidence into this index or assume the linter can sanitize arbitrary text.
+
+### Output and offline invocation
+
+The only operational `decision` is `NOT_READY`; `verification` is always
+`INDEPENDENTLY_UNVERIFIED`, including invalid input. Output is at most 4096 bytes:
+fixed version/contract identity, `structure`, fixed global `codes`, and fixed H1–H9
+IDs/decisions with deduplicated sorted diagnostic codes. It never echoes a reference,
+custodian, revision, timestamp, raw field, exception message or evidence content.
+
+| Structural result | Meaning | CLI exit |
+| --- | --- | --- |
+| INVALID | Bad schema, source pin, JSON/encoding, bounds, cutoff or conflicting metadata; no gate claims processed | 2 |
+| INCOMPLETE | At least one gate has `missing_references`, `review_policy_missing`, `revision_missing` or `stale_reference` | 1 |
+| COMPLETE | All structural reference requirements supplied; still independently unverified and operational NOT_READY | 3 |
+
+Global valid-input code is `independently_unverified`. Invalid-input codes are fixed:
+`invalid_input`, `invalid_encoding`, `invalid_json`, `duplicate_key`, `bounds`,
+`schema`, `invalid_cutoff`, `contract_mismatch`, `cutoff_mismatch`, `gate_set`,
+`fact_set`, `fact_status`, `fact_conflict`, `reference_schema`, `reference_time`,
+`duplicate_reference`, `reference_conflict`, `unknown_reference`, `unused_reference`,
+`output_bound`. Invalid input returns an empty gate list. No CLI result exits 0 or
+emits PASS/READY/activation. COMPLETE describes index structure only.
+
+Pipe the explicitly prepared metadata JSON into the stdin-only entrypoint and
+supply the chosen reproducible review cutoff. For syntax illustration only, the
+following cutoff is synthetic, not a live host fact or freshness recommendation:
+
+```text
+node agents/scripts/host-operator-evidence.mjs --as-of 1800000000000
+```
+
+There is no file-path argument, collector, output-file option or evidence opener.
+Run [the linter tests](scripts/host-operator-evidence.test.mjs) and the repository's
+full feasible Node suite for code verification; ordinary runs that skip A3 integration
+must report those skips. Synthetic all-unresolved, incremental and forged-complete
+fixtures verify preparation semantics, not H1–H9 host acceptance. This code never
+feeds `journal.next`, supplies a receipt or overrides `currentJob`.
+
+Named custodians and an authorized independent reviewer must still verify every
+protected evidence reference, applicable revision, validity policy and actual host
+fact. The owner must separately accept risks and authorize any later operation.
+No input can waive H7–H9 through H1–H6 structural completeness. Removing the A5
+module/tests and these documentation additions restores the A4 manual inventory;
+retain all existing UNRESOLVED rows, journals, receipts and pending outcomes.
+No live data collection, dependency change, installer, provider, ledger, executor,
+reporting, systemd/runtime/container/credential/job or activation change is included.

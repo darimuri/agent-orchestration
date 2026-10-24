@@ -744,3 +744,16 @@ fail-closed go/no-go rules. Host UID/GID/access, installed paths, administrative
 storage and event source facts remain **UNRESOLVED / NOT READY**. It authorizes no
 installation, live capability or runtime change; A3 offline fixtures do not establish
 host acceptance. Overall AGE #7 remains incomplete.
+
+### A5 offline host-evidence index linter
+
+[The A5 metadata contract](HOST_OPERATOR_HOST_ACCEPTANCE.md#a5-offline-evidence-index-lint)
+defines the bounded stdin-only [evidence linter](scripts/host-operator-evidence.mjs).
+It checks exact A4 source pins and H1–H9 reference metadata without opening evidence,
+probing the host, making network/process calls or persisting state. An explicit
+review cutoff makes the structural check reproducible. Invalid, incomplete and
+structurally complete indexes exit 2, 1 and 3 respectively; every result remains
+operational **NOT_READY / INDEPENDENTLY_UNVERIFIED**. Caller JSON cannot authorize
+an operation or produce host PASS. All A4 host rows remain UNRESOLVED / NOT READY.
+See the linked schema, bounds, fixed diagnostics, stdin usage and separate owner/
+independent-review obligations. No live acceptance or runtime change is implied.
