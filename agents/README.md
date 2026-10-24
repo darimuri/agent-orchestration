@@ -692,3 +692,21 @@ fixed operation descriptors and separate private intent/receipt journal. Disposa
 fixtures cover replay, crash reconciliation, concurrency and needs_user. This adds
 no service, socket, process executor, live Buzz/Kaneo publisher or host privilege;
 live verifier, restricted executor and host acceptance gates remain separate work.
+
+A1 adds an opt-in [direct-owner authentication adapter](HOST_OPERATOR.md#a1-direct-owner-public-event-authentication)
+with real event hash/Schnorr verification, status.revision-only admission and a
+mandatory synchronous current-job policy provider seam. No live provider is shipped;
+absence denies. Phase-1 schemas and journal are unchanged. Install its scoped locked
+dependencies before running the Node suites (Node >=20.19):
+
+```bash
+npm ci --prefix agents/host-operator-auth --ignore-scripts
+node --test agents/scripts/host-operator-auth.test.mjs agents/scripts/host-operator.test.mjs
+node --test agents/docker/*.test.mjs agents/scripts/*.test.mjs
+```
+
+Do not commit the generated `agents/host-operator-auth/node_modules` directory. If
+`/tmp` is noexec, AGE #5 full-suite fixtures need `TEST_EXECUTABLE_TMPDIR` pointing
+to a private executable temporary directory outside source; no live verifier is used.
+See HOST_OPERATOR.md for signature/policy limits, upstream dependency audit scope,
+receipt separation, remaining host-only gates and source rollback rules.
