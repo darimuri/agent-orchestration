@@ -7,6 +7,7 @@ import { pathToFileURL } from 'node:url';
 import { createHash } from 'node:crypto';
 import test from 'node:test';
 import { schnorr } from '../host-operator-auth/node_modules/@noble/curves/secp256k1.js';
+import { createRevisionObservationBridge } from '../host-operator-auth/revision-observation.mjs';
 import { createLocalEventIngress } from '../host-operator-auth/local-ingress.mjs';
 import { createFileEventPlacer } from '../host-operator-auth/event-placement.mjs';
 import { createFileEventResolver } from '../host-operator-auth/event-source.mjs';
@@ -97,6 +98,13 @@ function fixture(t, { grant = true, preplace = true } = {}) {
   const ingress = () => createLocalEventIngress({ eventDirectory: eventDir, journalDirectory: journalDir, uid: process.getuid(),
     ...owner, channelId, threadId, source, currentJob: (...args) => current(...args), clock: () => clock, monotonic: () => 0,
     verifyReceipt: evidence => { if (!receipts.has(evidence.ref)) throw Error(canary + directory); return receipts.get(evidence.ref); } });
+  const sourceDir = path.join(directory, 'observed-source');
+  const bridge = () => {
+    if (!fs.existsSync(sourceDir)) { fs.mkdirSync(sourceDir, { mode: 0o700 }); fs.mkdirSync(path.join(sourceDir, '.git'), { mode: 0o700 }); fs.writeFileSync(path.join(sourceDir, '.git/HEAD'), source.baseSha + '\n', { mode: 0o600 }); }
+    return createRevisionObservationBridge({ eventDirectory: eventDir, journalDirectory: journalDir, sourceDirectory: sourceDir, uid: process.getuid(),
+      ...owner, channelId, threadId, source, currentJob: (...args) => current(...args), clock: () => clock, monotonic: () => 0,
+      verifyReceipt: evidence => { if (!receipts.has(evidence.ref)) throw Error(canary + directory); return receipts.get(evidence.ref); } });
+  };
   function evidence(plan, outcome = 'success') {
     const ref = 'proof-' + receipts.size;
     receipts.set(ref, { version: 1, receiptId: ref, intentId: plan.intent.intentId, intentDigest: digest(plan.intent),
@@ -105,7 +113,7 @@ function fixture(t, { grant = true, preplace = true } = {}) {
     return { ref };
   }
   const disk = () => fs.existsSync(path.join(journalDir, 'state.json')) ? fs.readFileSync(path.join(journalDir, 'state.json'), 'utf8') : '';
-  return { r, directory, journalDir, agentsFile, jobsFile, eventDir, eventFile, hostileEvent, placer, placement, write, writer, command, admin, privateDigests, journal, ingress, evidence, receipts, disk, adapter, adapterOptions, provider,
+  return { r, directory, journalDir, agentsFile, jobsFile, eventDir, eventFile, hostileEvent, placer, placement, write, writer, command, admin, privateDigests, journal, ingress, bridge, sourceDir, evidence, receipts, disk, adapter, adapterOptions, provider,
     time: value => { clock = value; }, event: value => { event = value; hostileEvent(value, r.authorizationEventId); if (value.id !== r.authorizationEventId) hostileEvent(value); },
     eventHook: fn => { eventHook = fn; },
     hook: fn => { hook = fn; }, monotonic: fn => { monotonic = fn; }, current: fn => { current = fn; } };
@@ -438,4 +446,22 @@ integration('A10 journal persistence lost response never returns placement succe
   const before = f.disk(); assert.equal(Object.values(JSON.parse(before).entries)[0].effects.length, 1);
   assert.equal(ingress.ingest(JSON.stringify(signed())).status, 'placement_unconfirmed'); assert.equal(f.disk(), before);
   assert.equal(f.journal().next(f.r).status, 'outcome_unknown');
+});
+
+integration('A12 actual ingress -> pending journal -> actual A11 bridge observes/mismatches without consuming execution', t => {
+  const f=fixture(t,{preplace:false}),plan=f.ingress().ingest(JSON.stringify(signed())),expected={intentId:plan.intent.intentId,intentDigest:plan.intentDigest},bridge=f.bridge(),before=f.disk();
+  const result=bridge.observe(JSON.stringify(signed()),expected);assert.equal(result.status,'observed');assert.equal(result.intentId,plan.intent.intentId);assert.equal(result.observation.observedSha,source.baseSha);noLeaks(f,result);assert.equal(f.disk(),before);
+  fs.writeFileSync(path.join(f.sourceDir,'.git/HEAD'),'a'.repeat(40));const mismatch=bridge.observe(JSON.stringify(signed()),expected);assert.equal(mismatch.status,'mismatch');assert.equal(mismatch.observation.observedSha,'a'.repeat(40));assert.equal(f.disk(),before);
+  assert.equal(f.journal().next(f.r).status,'outcome_unknown');assert.throws(()=>f.journal().record(f.r,result),e=>e.code==='receipt_invalid');assert.equal(f.disk(),before);
+});
+for(const at of [1,2,3,4])integration(`A12 actual writer revoke before inspection policy call${at} suppresses result`,t=>{
+  const f=fixture(t,{preplace:false}),plan=f.ingress().ingest(JSON.stringify(signed())),expected={intentId:plan.intent.intentId,intentDigest:plan.intentDigest},bridge=f.bridge(),before=f.disk();let calls=0;
+  f.hook(()=>{if(++calls===at)assert.equal(f.admin('remove').status,'confirmed');});
+  assert.throws(()=>bridge.observe(JSON.stringify(signed()),expected),e=>e.code==='revision_observation_denied'&&e.message===e.code&&e.stack===e.code);assert.equal(f.disk(),before);
+});
+for(const fault of ['event-delete','receipt-record'])integration(`A12 ${fault} during actual source read suppresses stale observation`,t=>{
+  const f=fixture(t,{preplace:false}),plan=f.ingress().ingest(JSON.stringify(signed())),expected={intentId:plan.intent.intentId,intentDigest:plan.intentDigest},bridge=f.bridge(),before=f.disk(),original=fs.readSync;let changed=false;
+  fs.readSync=(fd,...args)=>{const count=original(fd,...args);if(fs.fstatSync(fd).size===41&&!changed){changed=true;if(fault==='event-delete')fs.unlinkSync(f.eventFile(f.r.authorizationEventId));else assert.equal(f.journal().record(f.r,f.evidence(plan)).status,'recorded');}return count;};
+  try{assert.throws(()=>bridge.observe(JSON.stringify(signed()),expected),e=>e.code==='revision_observation_denied');}finally{fs.readSync=original;}
+  assert(changed);if(fault==='event-delete'){assert.equal(f.disk(),before);f.time(now+600000);assert.equal(f.journal().record(f.r,f.evidence(plan)).status,'recorded');}else assert.equal(Object.values(JSON.parse(f.disk()).entries)[0].effects[0].receipt.outcome,'success');
 });
