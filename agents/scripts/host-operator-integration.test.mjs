@@ -7,6 +7,7 @@ import { pathToFileURL } from 'node:url';
 import { createHash } from 'node:crypto';
 import test from 'node:test';
 import { schnorr } from '../host-operator-auth/node_modules/@noble/curves/secp256k1.js';
+import { createFileEventPlacer } from '../host-operator-auth/event-placement.mjs';
 import { createFileEventResolver } from '../host-operator-auth/event-source.mjs';
 import { createAuthorizationAdapter } from '../host-operator-auth/authorization.mjs';
 import { HostOperatorJournal } from './host-operator-journal.mjs';
@@ -54,7 +55,7 @@ function fixture(t, { grant = true } = {}) {
   const agentsFile = path.join(directory, 'agents.json'), jobsFile = path.join(directory, 'jobs.json');
   const eventDir = path.join(directory, 'events'); fs.mkdirSync(eventDir, { mode: 0o700 });
   const eventFile = id => path.join(eventDir, id + '.json');
-  const placeEvent = (value, id = value.id) => {
+  const hostileEvent = (value, id = value.id) => {
     fs.writeFileSync(eventFile(id) + '.new', JSON.stringify(value), { mode: 0o600 });
     fs.renameSync(eventFile(id) + '.new', eventFile(id));
   };
@@ -82,7 +83,9 @@ function fixture(t, { grant = true } = {}) {
   if (grant) assert.equal(admin('set').status, 'confirmed');
   const provider = createHostPolicySource(options);
   let current = (...args) => { calls++; hook(calls); return provider(...args); };
-  placeEvent(event);
+  const placer = createFileEventPlacer({ directory: eventDir, uid: process.getuid(), ownerPubkey, targetPubkey, channelId, threadId, source, clock: () => clock });
+  const placement = placer.place(JSON.stringify(event));
+  assert.equal(placement.status, 'confirmed');
   let eventReads = 0, eventHook = () => {};
   const resolveEvent = createFileEventResolver({ directory: eventDir, uid: process.getuid(), clock: () => clock, monotonic: () => 0 });
   const adapterOptions = { ...owner, channelId, threadId, source, clock: () => clock,
@@ -98,8 +101,8 @@ function fixture(t, { grant = true } = {}) {
     return { ref };
   }
   const disk = () => fs.existsSync(path.join(journalDir, 'state.json')) ? fs.readFileSync(path.join(journalDir, 'state.json'), 'utf8') : '';
-  return { r, directory, journalDir, agentsFile, jobsFile, eventDir, eventFile, placeEvent, write, writer, command, admin, privateDigests, journal, evidence, receipts, disk, adapter, adapterOptions, provider,
-    time: value => { clock = value; }, event: value => { event = value; placeEvent(value, r.authorizationEventId); if (value.id !== r.authorizationEventId) placeEvent(value); },
+  return { r, directory, journalDir, agentsFile, jobsFile, eventDir, eventFile, hostileEvent, placer, placement, write, writer, command, admin, privateDigests, journal, evidence, receipts, disk, adapter, adapterOptions, provider,
+    time: value => { clock = value; }, event: value => { event = value; hostileEvent(value, r.authorizationEventId); if (value.id !== r.authorizationEventId) hostileEvent(value); },
     eventHook: fn => { eventHook = fn; },
     hook: fn => { hook = fn; }, monotonic: fn => { monotonic = fn; }, current: fn => { current = fn; } };
 }
@@ -124,6 +127,7 @@ integration('real signed A1 + private-file A2 + journal complete replay and sepa
     const plan = f.journal().next(f.r); assert.equal(plan.intent.step, step); noLeaks(f, plan);
     const pending = f.disk(); assert.equal(f.journal().next(f.r).status, 'outcome_unknown'); assert.equal(f.disk(), pending);
     assert.throws(() => f.journal().record(f.r, signed()), e => e.code === 'receipt_invalid');
+    assert.throws(() => f.journal().record(f.r, f.placement), e => e.code === 'receipt_invalid');
     assert.throws(() => f.journal().record(f.r, facts), e => e.code === 'receipt_invalid');
     assert.equal(f.disk(), pending);
     const proof = f.evidence(plan); noLeaks(f, f.journal().record(f.r, proof)); f.journal().record(f.r, proof);
@@ -338,7 +342,7 @@ for (const step of ['execution', 'kaneo', 'buzz']) for (const at of [1, 2]) for 
     if (++reads !== at) return;
     assert.equal(fs.existsSync(path.join(f.journalDir, 'journal.lock')), at === 2);
     if (fault === 'delete') fs.unlinkSync(f.eventFile(f.r.authorizationEventId));
-    else f.placeEvent(signed({ ...baseRequest, requestId: 'different-valid-event' }), f.r.authorizationEventId);
+    else f.hostileEvent(signed({ ...baseRequest, requestId: 'different-valid-event' }), f.r.authorizationEventId);
     changed++;
   });
   denied(f); assert.equal(changed, 1); assert.equal(f.disk(), before); noLeaks(f, before);
@@ -350,7 +354,7 @@ for (const fault of ['delete', 'malformed']) integration(`missing or ${fault} ev
   else fs.writeFileSync(f.eventFile(f.r.authorizationEventId), canary);
   denied(f); assert.equal(f.journal().record(f.r, proof).status, 'recorded'); denied(f);
   // Fixture-only restoration: it is not fallback behavior in the source or adapter.
-  f.placeEvent(signed());
+  f.hostileEvent(signed());
   for (const step of ['kaneo', 'buzz']) {
     const plan = f.journal().next(f.r); assert.equal(plan.intent.step, step); f.journal().record(f.r, f.evidence(plan));
   }
@@ -361,5 +365,25 @@ integration('explicit error/Promise raw-event seams cannot replace the real file
   for (const resolveEvent of [() => { throw Error(canary + f.directory); }, () => Promise.resolve(signed()), () => ({ verified: true })]) {
     const adapter = createAuthorizationAdapter({ ...f.adapterOptions, resolveEvent });
     denied(f, () => adapter(f.r, descriptor(f.r, source))); assert.equal(f.disk(), '');
+  }
+});
+
+integration('real placement unknown is separate from A8 visibility, A2 eligibility and journal receipt authority', t => {
+  for (const point of ['two-links', 'parent-sync']) {
+    const f = fixture(t); fs.unlinkSync(f.eventFile(f.r.authorizationEventId));
+    const name = point === 'two-links' ? 'unlinkSync' : 'fsyncSync', original = fs[name];
+    fs[name] = (...args) => {
+      if (point === 'two-links' || fs.fstatSync(args[0]).isDirectory()) throw Error(canary + f.directory);
+      return original(...args);
+    };
+    let placement; try { placement = f.placer.place(JSON.stringify(signed())); } finally { fs[name] = original; }
+    assert.equal(placement.status, 'outcome_unknown'); noLeaks(f, placement);
+    if (point === 'two-links') { denied(f); assert.equal(fs.statSync(f.eventFile(f.r.authorizationEventId)).nlink, 2); }
+    else {
+      const plan = f.journal().next(f.r); assert.equal(plan.intent.step, 'execution');
+      assert.throws(() => f.journal().record(f.r, placement), e => e.code === 'receipt_invalid');
+      assert.equal(f.placer.place(JSON.stringify(signed())).status, 'already_present');
+      f.admin('remove'); denied(f);
+    }
   }
 });
