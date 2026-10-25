@@ -870,3 +870,93 @@ real source/event/journal/receipt bindings and jobs authority. A future consumer
 must stop on observation failure, never echo expected SHA or manufacture a receipt.
 No operational rollback, deployment, runtime, credentials or live path mutation is
 part of this slice.
+
+## A12: non-consuming pending revision observation — live NOT_READY
+
+`HostOperatorJournal.inspectPendingExecution(request, {intentId, intentDigest})`
+is an additive inspection API. It hardens bounded own primitive data before the
+existing request/descriptor/JSON helpers, then reauthenticates outside and inside
+the existing exclusive journal lock. The full stored state is validated by the
+existing lock path. The exact existing request hash, descriptor and stored identity
+must match current authorization; the last effect must be an unreceipted execution
+for `status.revision`/`read_only` with no user action, matching ID/digest and an
+unexpired deadline. Clocks are rechecked after policy and must not reverse.
+Missing/consumed/report/user/conflicting/expired execution is never authority.
+
+The result is a detached copy `{intent, intentDigest}` of the actual pending effect.
+It creates no entry/intent/reservation/receipt, calls no persistence callback, and
+never rewrites `state.json` or advances sequence. Existing schema, `next` and `record`
+semantics are unchanged. **State-read-only is not filesystem-side-effect-free:**
+inspection creates, syncs and removes the normal `journal.lock`; death or unlink
+failure can leave a stale lock. Existing unresolved-temp/stale-lock refusal stays
+intact, with no automatic cleanup/adoption. All inspection failures throw fixed
+`pending_execution_denied` code/message/stack, including authorization/storage/lock
+failures; denial is not a claim that a transient lock was never created.
+
+`host-operator-auth/revision-observation.mjs` exports
+`createRevisionObservationBridge({eventDirectory,journalDirectory,sourceDirectory,
+uid,ownerPubkey,requesterId,mentionPubkey,targetPubkey,channelId,threadId,source,
+currentJob,verifyReceipt,clock?,monotonic?}) -> frozen {observe(raw, expected)}`.
+Construction fixes canonical existing protected, distinct, non-nested roots and
+ordinary actual UID, snapshots own configuration/source and requires the existing
+trusted host seams. Event/journal private0700 and A11 source-mode rules are kept.
+There is no injected observer/journal/handler or request-controlled path, environment,
+argv, registry, command, process, transport, service or live configuration discovery.
+`verifyReceipt` is required for the real journal but is not called by this bridge.
+
+`observe` takes exactly one bounded detached serialized raw event and the exact
+`{intentId,intentDigest}` data pair. It uses actual A1 to derive the request; raw
+objects, proxies, shared/extended/getter Buffers, BOM, extra arguments and malformed
+or oversized data deny. The event must already be safely placed and pending work
+must already exist: this bridge calls neither placer/ingress nor `next`/`record`.
+Actual A8 and the actual A1 authorization adapter, with mandatory currentJob policy,
+remain the journal authority on every inspection.
+
+Sequence is **actual inspection → actual A11 observer once → actual inspection**.
+Each inspection independently checks policy before/under lock. No journal lock is
+held across source observation. The second check must still find the same pending
+request/intent/digest before deadline. Observation fields/time/source/expected SHA
+are normalized against the pinned context and final clock. Removal/replacement of
+the signed event, policy revocation or a genuine receipt recorded during the source
+read suppresses output. The earlier read happened; suppression does not undo it.
+
+A bounded result (<=4096 bytes) contains status `observed` or `mismatch`, intentId,
+intentDigest, requestHash, descriptorDigest and the normalized actual A11 observation.
+This is **HEAD POINTER ONLY**, with the same object/tree/dirty/origin/sourceDigest/
+install-integrity limits as A11. It contains no PASS/READY/completed/native receipt,
+raw event/signature/private path/callback text/private administrative digest. All
+bridge constructor/call failures throw fixed `revision_observation_denied`
+code/message/stack; a failed final check never returns a stale successful observation.
+
+This API is explicitly **non-consuming**. Repeated and concurrent authorized calls
+may repeat a read-only observation. Pending execution and its receipt stay unchanged;
+direct `next` still reports pending `outcome_unknown` until a separate genuine
+receipt is recorded. Inspection/observation/signature/policy results cannot satisfy
+`record`'s independent completion evidence. Historical receipt reconciliation stays
+with that separate API. No claim, scheduler, automatic retry/resume, receipt creation,
+execution completion or native reporter is added.
+
+Two checks narrow observed races without creating a transaction across source,
+policy and released locks. A final-check revoke/ABA/same-UID writer or later change
+remains outside the guarantee. A11's observed100ms read budget cannot preempt a
+blocked syscall or enforce the registered5000ms whole-operation limit; the bridge
+checks the stored execution deadline but cannot interrupt synchronous I/O. No global
+exactly-once execution or universal admission/durability fence is claimed.
+
+Tests use actual ingress/journal/authorization/A11 against protected fixtures and
+actual pinned Gateway provider/A6 writer integration. They check state bytes/mtime/
+sequence/receipt preservation, transient lock behavior, both inspection auth checks,
+real mismatch, missing/forged/consumed/expired work, raw/config hardening, source and
+storage failures, receipt/event/revocation races, concurrent non-consuming reads and
+SIGKILL stale-lock preservation. Existing journal death/ENOSPC/receipt suites remain
+regression coverage. The unchanged pinned harness requires zero integration skips;
+ordinary disconnected skips are recorded separately.
+
+Actual disjoint namespaces/UID/protected access/current policy integration/input
+custody/immutable installation/storage/capacity/recovery and later consumer/receipt
+protocol still need owner acceptance. H1–H9 live NOT_READY; #21 isolation and #11
+Ready workflow remain separate. No live paths, privileges, runtime, credentials or
+Gateway/dependencies are changed. Source rollback removes the additive inspector,
+bridge/new tests and integration/doc additions only; preserve real schema/state/
+intents/receipts/source mappings. Future callers fail closed rather than trust
+serialized intent JSON, reset a journal, switch namespace or clear stale locks.

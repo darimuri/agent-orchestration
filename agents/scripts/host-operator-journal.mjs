@@ -2,6 +2,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
+import { types } from 'node:util';
 import { ProtocolError, deny, copy, exact, bounded, digest, identifier, hexadecimal, timestamp,
   request, binding, descriptor, identity, authorize, userAction, receipt, publicReceipt } from './host-operator-protocol.mjs';
 
@@ -82,6 +83,20 @@ function validateEntry(e, source, now) {
   }
 }
 
+// Inspection inputs are data, never serialized authority or executable callbacks.
+function inspectionData(value) {
+  if (!value || typeof value !== 'object' || types.isProxy(value) || Object.getPrototypeOf(value) !== Object.prototype) deny('pending_execution_denied');
+  const props = Object.getOwnPropertyDescriptors(value), keys = Reflect.ownKeys(props);
+  if (keys.length > 16 || keys.some(k => typeof k !== 'string' || !Object.hasOwn(props[k], 'value') || !props[k].enumerable)) deny('pending_execution_denied');
+  const result = {};
+  for (const k of keys) {
+    const v = props[k].value;
+    if (!((typeof v === 'string' && Buffer.byteLength(v) <= 512) || (typeof v === 'number' && Number.isSafeInteger(v)))) deny('pending_execution_denied');
+    Object.defineProperty(result, k, { value: v, enumerable: true });
+  }
+  bounded(result, 4096); return result;
+}
+
 export class HostOperatorJournal {
   #directory; #source; #owner; #authorize; #verifyReceipt; #clock;
   constructor({ directory, source, ownerPubkey, authorize: authorizationAdapter, verifyReceipt, clock = Date.now }) {
@@ -116,6 +131,29 @@ export class HostOperatorJournal {
       if (locked) {
         try { fs.closeSync(fd); fs.unlinkSync(lock); } catch { deny('journal_io'); }
       }
+    }
+  }
+  // Non-consuming inspection: state.json is never persisted; the normal exclusive
+  // lock is still created/synced/removed and may remain stale after process death.
+  inspectPendingExecution(input, expected) {
+    try {
+      if (arguments.length !== 2) deny('pending_execution_denied');
+      const r = request(inspectionData(input)), d = descriptor(r, this.#source), wanted = inspectionData(expected);
+      exact(wanted, ['intentId', 'intentDigest']); identifier(wanted.intentId); hexadecimal(wanted.intentDigest);
+      if (d.operationId !== 'status.revision' || d.privilege !== 'read_only' || d.userActionId !== null) deny('pending_execution_denied');
+      let previous = -1;
+      const inspectionNow = () => { const value = this.#now(); if (value < previous) deny('pending_execution_denied'); previous = value; return value; };
+      authorize(this.#authorize, r, d, this.#owner, inspectionNow());
+      return this.#locked(state => {
+        const now = inspectionNow(), who = authorize(this.#authorize, r, d, this.#owner, now), e = state.entries[keyFor(r)];
+        if (!e || e.requestHash !== digest(r) || digest(e.descriptor) !== digest(d) || digest(e.identity) !== digest(who)) deny('pending_execution_denied');
+        const effect = e.effects.at(-1), intent = effect?.intent, checkedAt = inspectionNow();
+        if (!intent || intent.step !== 'execution' || effect.receipt !== null || intent.intentId !== wanted.intentId ||
+            digest(intent) !== wanted.intentDigest || checkedAt < intent.createdAt || checkedAt >= intent.deadline) deny('pending_execution_denied');
+        const result = { intent, intentDigest: digest(intent) }; bounded(result, 4096); return result;
+      });
+    } catch {
+      const error = new ProtocolError('pending_execution_denied'); error.stack = 'pending_execution_denied'; throw error;
     }
   }
   next(input) {
