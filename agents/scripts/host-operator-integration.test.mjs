@@ -7,6 +7,7 @@ import { pathToFileURL } from 'node:url';
 import { createHash } from 'node:crypto';
 import test from 'node:test';
 import { schnorr } from '../host-operator-auth/node_modules/@noble/curves/secp256k1.js';
+import { createLocalRevisionInvocation } from '../host-operator-auth/local-invocation.mjs';
 import { createRevisionObservationBridge } from '../host-operator-auth/revision-observation.mjs';
 import { createLocalEventIngress } from '../host-operator-auth/local-ingress.mjs';
 import { createFileEventPlacer } from '../host-operator-auth/event-placement.mjs';
@@ -105,6 +106,13 @@ function fixture(t, { grant = true, preplace = true } = {}) {
       ...owner, channelId, threadId, source, currentJob: (...args) => current(...args), clock: () => clock, monotonic: () => 0,
       verifyReceipt: evidence => { if (!receipts.has(evidence.ref)) throw Error(canary + directory); return receipts.get(evidence.ref); } });
   };
+  const invocation = () => {
+    // Same fixture source namespace; production constructor itself creates nothing.
+    if (!fs.existsSync(sourceDir)) { fs.mkdirSync(sourceDir, { mode: 0o700 }); fs.mkdirSync(path.join(sourceDir, '.git'), { mode: 0o700 }); fs.writeFileSync(path.join(sourceDir, '.git/HEAD'), source.baseSha + '\n', { mode: 0o600 }); }
+    return createLocalRevisionInvocation({ eventDirectory: eventDir, journalDirectory: journalDir, sourceDirectory: sourceDir, uid: process.getuid(),
+      ...owner, channelId, threadId, source, currentJob: (...args) => current(...args), clock: () => clock, monotonic: () => 0,
+      verifyReceipt: evidence => { if (!receipts.has(evidence.ref)) throw Error(canary + directory); return receipts.get(evidence.ref); } });
+  };
   function evidence(plan, outcome = 'success') {
     const ref = 'proof-' + receipts.size;
     receipts.set(ref, { version: 1, receiptId: ref, intentId: plan.intent.intentId, intentDigest: digest(plan.intent),
@@ -113,7 +121,7 @@ function fixture(t, { grant = true, preplace = true } = {}) {
     return { ref };
   }
   const disk = () => fs.existsSync(path.join(journalDir, 'state.json')) ? fs.readFileSync(path.join(journalDir, 'state.json'), 'utf8') : '';
-  return { r, directory, journalDir, agentsFile, jobsFile, eventDir, eventFile, hostileEvent, placer, placement, write, writer, command, admin, privateDigests, journal, ingress, bridge, sourceDir, evidence, receipts, disk, adapter, adapterOptions, provider,
+  return { r, directory, journalDir, agentsFile, jobsFile, eventDir, eventFile, hostileEvent, placer, placement, write, writer, command, admin, privateDigests, journal, ingress, bridge, invocation, sourceDir, evidence, receipts, disk, adapter, adapterOptions, provider,
     time: value => { clock = value; }, event: value => { event = value; hostileEvent(value, r.authorizationEventId); if (value.id !== r.authorizationEventId) hostileEvent(value); },
     eventHook: fn => { eventHook = fn; },
     hook: fn => { hook = fn; }, monotonic: fn => { monotonic = fn; }, current: fn => { current = fn; } };
@@ -464,4 +472,18 @@ for(const fault of ['event-delete','receipt-record'])integration(`A12 ${fault} d
   fs.readSync=(fd,...args)=>{const count=original(fd,...args);if(fs.fstatSync(fd).size===41&&!changed){changed=true;if(fault==='event-delete')fs.unlinkSync(f.eventFile(f.r.authorizationEventId));else assert.equal(f.journal().record(f.r,f.evidence(plan)).status,'recorded');}return count;};
   try{assert.throws(()=>bridge.observe(JSON.stringify(signed()),expected),e=>e.code==='revision_observation_denied');}finally{fs.readSync=original;}
   assert(changed);if(fault==='event-delete'){assert.equal(f.disk(),before);f.time(now+600000);assert.equal(f.journal().record(f.r,f.evidence(plan)).status,'recorded');}else assert.equal(Object.values(JSON.parse(f.disk()).entries)[0].effects[0].receipt.outcome,'success');
+});
+
+integration('A13 actual invocation composes fresh admission and observation; repeat never resumes and busy request cannot observe',t=>{
+  const f=fixture(t,{preplace:false}),invocation=f.invocation(),raw=JSON.stringify(signed());const result=invocation.invoke(raw);assert.equal(result.status,'observed');assert.equal(result.observation.observation.observedSha,source.baseSha);noLeaks(f,result);const before=f.disk();assert.equal(Object.values(JSON.parse(before).entries)[0].effects[0].receipt,null);
+  assert.deepEqual(invocation.invoke(raw),{status:'not_observed',stage:'admission',code:'placement_unconfirmed'});assert.equal(invocation.invoke(JSON.stringify(signed({...baseRequest,requestId:'request-two'}))).code,'workspace_busy');assert.equal(f.disk(),before);assert.throws(()=>f.journal().record(f.r,result),e=>e.code==='receipt_invalid');
+});
+integration('A13 actual different HEAD returns mismatch without consuming pending intent',t=>{
+  const f=fixture(t,{preplace:false}),invocation=f.invocation();fs.writeFileSync(path.join(f.sourceDir,'.git/HEAD'),'2'.repeat(40));const result=invocation.invoke(JSON.stringify(signed()));assert.equal(result.status,'mismatch');assert.equal(result.observation.observation.observedSha,'2'.repeat(40));assert.equal(f.journal().next(f.r).status,'outcome_unknown');noLeaks(f,result);
+});
+for(const at of [3,4,5,6])integration(`A13 actual writer revoke at policy call${at} after admission suppresses observation`,t=>{
+  const f=fixture(t,{preplace:false}),invocation=f.invocation();f.hook(call=>{if(call===at)assert.equal(f.admin('remove').status,'confirmed');});const result=invocation.invoke(JSON.stringify(signed()));assert.equal(result.status,'not_observed');assert.equal(result.stage,'observation');assert.equal(result.code,'revision_observation_denied');const effect=Object.values(JSON.parse(f.disk()).entries)[0].effects[0];assert.equal(effect.receipt,null);assert.equal(result.admittedIntent.intentId,effect.intent.intentId);noLeaks(f,result);
+});
+for(const point of ['receipt','event'])integration(`A13 concurrent actual ${point} during source read preserves durable progress without stale result`,t=>{
+  const f=fixture(t,{preplace:false}),invocation=f.invocation(),original=fs.readSync;let changed=false;fs.readSync=(fd,...args)=>{const n=original(fd,...args);if(fs.fstatSync(fd).size===41&&!changed){changed=true;if(point==='event')fs.unlinkSync(f.eventFile(f.r.authorizationEventId));else{const i=Object.values(JSON.parse(f.disk()).entries)[0].effects[0].intent;assert.equal(f.journal().record(f.r,f.evidence({intent:i,intentDigest:digest(i)})).status,'recorded');}}return n;};let result;try{result=invocation.invoke(JSON.stringify(signed()));}finally{fs.readSync=original;}assert(changed);assert.equal(result.status,'not_observed');assert.equal(result.stage,'observation');if(point==='receipt')assert.equal(Object.values(JSON.parse(f.disk()).entries)[0].effects[0].receipt.outcome,'success');else assert.equal(Object.values(JSON.parse(f.disk()).entries)[0].effects[0].receipt,null);noLeaks(f,result);
 });
