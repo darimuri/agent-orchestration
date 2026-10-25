@@ -7,6 +7,7 @@ import { pathToFileURL } from 'node:url';
 import { createHash } from 'node:crypto';
 import test from 'node:test';
 import { schnorr } from '../host-operator-auth/node_modules/@noble/curves/secp256k1.js';
+import { createFileEventResolver } from '../host-operator-auth/event-source.mjs';
 import { createAuthorizationAdapter } from '../host-operator-auth/authorization.mjs';
 import { HostOperatorJournal } from './host-operator-journal.mjs';
 import { digest, descriptor, ProtocolError } from './host-operator-protocol.mjs';
@@ -51,6 +52,12 @@ function fixture(t, { grant = true } = {}) {
   t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
   const journalDir = path.join(directory, 'journal'); fs.mkdirSync(journalDir, { mode: 0o700 });
   const agentsFile = path.join(directory, 'agents.json'), jobsFile = path.join(directory, 'jobs.json');
+  const eventDir = path.join(directory, 'events'); fs.mkdirSync(eventDir, { mode: 0o700 });
+  const eventFile = id => path.join(eventDir, id + '.json');
+  const placeEvent = (value, id = value.id) => {
+    fs.writeFileSync(eventFile(id) + '.new', JSON.stringify(value), { mode: 0o600 });
+    fs.renameSync(eventFile(id) + '.new', eventFile(id));
+  };
   // Hostile/legacy raw-write fixtures only; positive capability lifecycle uses the real writer below.
   function write(s = state()) {
     for (const [file, data] of [[agentsFile, s.agents], [jobsFile, s.jobs]]) {
@@ -75,8 +82,11 @@ function fixture(t, { grant = true } = {}) {
   if (grant) assert.equal(admin('set').status, 'confirmed');
   const provider = createHostPolicySource(options);
   let current = (...args) => { calls++; hook(calls); return provider(...args); };
+  placeEvent(event);
+  let eventReads = 0, eventHook = () => {};
+  const resolveEvent = createFileEventResolver({ directory: eventDir, uid: process.getuid(), clock: () => clock, monotonic: () => 0 });
   const adapterOptions = { ...owner, channelId, threadId, source, clock: () => clock,
-    resolveEvent: id => id === event.id ? JSON.stringify(event) : null, currentJob: (...args) => current(...args) };
+    resolveEvent: id => { eventHook(++eventReads); return resolveEvent(id); }, currentJob: (...args) => current(...args) };
   const adapter = createAuthorizationAdapter(adapterOptions);
   const journal = () => new HostOperatorJournal({ directory: journalDir, source, ownerPubkey, authorize: adapter, clock: () => clock,
     verifyReceipt: evidence => { if (!receipts.has(evidence.ref)) throw Error(canary + directory); return receipts.get(evidence.ref); } });
@@ -88,8 +98,9 @@ function fixture(t, { grant = true } = {}) {
     return { ref };
   }
   const disk = () => fs.existsSync(path.join(journalDir, 'state.json')) ? fs.readFileSync(path.join(journalDir, 'state.json'), 'utf8') : '';
-  return { r, directory, journalDir, agentsFile, jobsFile, write, writer, command, admin, privateDigests, journal, evidence, receipts, disk, adapter, adapterOptions, provider,
-    time: value => { clock = value; }, event: value => { event = value; },
+  return { r, directory, journalDir, agentsFile, jobsFile, eventDir, eventFile, placeEvent, write, writer, command, admin, privateDigests, journal, evidence, receipts, disk, adapter, adapterOptions, provider,
+    time: value => { clock = value; }, event: value => { event = value; placeEvent(value, r.authorizationEventId); if (value.id !== r.authorizationEventId) placeEvent(value); },
+    eventHook: fn => { eventHook = fn; },
     hook: fn => { hook = fn; }, monotonic: fn => { monotonic = fn; }, current: fn => { current = fn; } };
 }
 function denied(f, fn = () => f.journal().next(f.r)) {
@@ -314,4 +325,41 @@ integration('unknown writer commit with visible candidate is unproven, separatel
   assert.equal(f.journal().next(f.r).status, 'outcome_unknown'); assert.equal(f.disk(), pending);
   // No administrative replay, cleanup, recovery fsync or rollback: artifacts remain.
   assert(fs.existsSync(f.jobsFile + '.host-admission.lock')); assert(fs.readFileSync(f.jobsFile).equals(candidate));
+});
+
+for (const step of ['execution', 'kaneo', 'buzz']) for (const at of [1, 2]) for (const fault of ['delete', 'replace']) integration(`file source ${fault} at ${step} authorization ${at} denies without changing journal history`, t => {
+  const f = fixture(t);
+  for (const prior of ['execution', 'kaneo']) {
+    if (prior === step) break;
+    const plan = f.journal().next(f.r); f.journal().record(f.r, f.evidence(plan));
+  }
+  const before = f.disk(); let reads = 0, changed = 0;
+  f.eventHook(() => {
+    if (++reads !== at) return;
+    assert.equal(fs.existsSync(path.join(f.journalDir, 'journal.lock')), at === 2);
+    if (fault === 'delete') fs.unlinkSync(f.eventFile(f.r.authorizationEventId));
+    else f.placeEvent(signed({ ...baseRequest, requestId: 'different-valid-event' }), f.r.authorizationEventId);
+    changed++;
+  });
+  denied(f); assert.equal(changed, 1); assert.equal(f.disk(), before); noLeaks(f, before);
+});
+for (const fault of ['delete', 'malformed']) integration(`missing or ${fault} event does not block separate historical receipt, but denies next intent and complete replay`, t => {
+  const f = fixture(t), pending = f.journal().next(f.r), proof = f.evidence(pending), before = f.disk();
+  assert.equal(f.journal().next(f.r).status, 'outcome_unknown'); assert.equal(f.disk(), before);
+  if (fault === 'delete') fs.unlinkSync(f.eventFile(f.r.authorizationEventId));
+  else fs.writeFileSync(f.eventFile(f.r.authorizationEventId), canary);
+  denied(f); assert.equal(f.journal().record(f.r, proof).status, 'recorded'); denied(f);
+  // Fixture-only restoration: it is not fallback behavior in the source or adapter.
+  f.placeEvent(signed());
+  for (const step of ['kaneo', 'buzz']) {
+    const plan = f.journal().next(f.r); assert.equal(plan.intent.step, step); f.journal().record(f.r, f.evidence(plan));
+  }
+  const complete = f.disk(); fs.unlinkSync(f.eventFile(f.r.authorizationEventId)); denied(f); assert.equal(f.disk(), complete);
+});
+integration('explicit error/Promise raw-event seams cannot replace the real file resolver with authority', t => {
+  const f = fixture(t);
+  for (const resolveEvent of [() => { throw Error(canary + f.directory); }, () => Promise.resolve(signed()), () => ({ verified: true })]) {
+    const adapter = createAuthorizationAdapter({ ...f.adapterOptions, resolveEvent });
+    denied(f, () => adapter(f.r, descriptor(f.r, source))); assert.equal(f.disk(), '');
+  }
 });
