@@ -404,7 +404,7 @@ compatibility gap. A7 extends it to compose the actual merged A6
 `createHostAdmissionWriter`, the actual A1 signed-event adapter, the actual built
 Gateway `createHostPolicySource`, and the actual journal. It imports no live config,
 starts no service, discovers no operational ledgers and executes no intent. Events
-use the public BIP-340 vector-0 test scalar, the resolver is an ID-indexed raw fixture,
+use the public BIP-340 vector-0 test scalar; A8 resolves exact-ID raw fixture files,
 and receipt verification is a separate positive fixture authority. Private disposable
 agents/jobs files go through the unchanged A2 ownership, ancestry and safe-file checks.
 The execution subject remains distinct from the requesting owner.
@@ -534,3 +534,100 @@ live event/current-policy processing, execution or native reporting. Future host
 positive/negative acceptance, independent review of evidence and owner authorization
 remain separate. A4 changes no code, tests, dependencies, installer, live ledger,
 capability, job, runtime, credential, container/service or deployment.
+
+## A8: bounded local candidate-event byte source — live NOT_READY
+
+`host-operator-auth/event-source.mjs` exports
+`createFileEventResolver({directory, uid, clock?, monotonic?})`. Its result is the
+synchronous `resolveEvent(eventId)` callback accepted by the unchanged A1 adapter.
+Trusted host construction selects one canonical absolute **non-secret-event-only**
+namespace and its expected ordinary runtime UID, which must equal the process UID.
+No live path, new identity or installation is selected by this module or these tests.
+Do not select a ledger, journal or agent HOME as an event namespace. Constructor
+configuration is not requester input, and this library is not a generic file endpoint.
+
+The request supplies only an exact 64-character lowercase hexadecimal event ID;
+the filename is internally derived as `eventId + '.json'`. Objects, path segments,
+URLs, suffixes, uppercase, malformed and oversized IDs deny without file lookup.
+The configured directory is bounded to 4096 UTF-8 bytes, and the derived path must
+also fit that bound. Each lookup validates existing canonical ancestry, opens and
+anchors the directory, then opens one named file with no-follow/nonblocking flags.
+The event directory must be expected-UID mode 0700; the event must be a same-device,
+single-link regular file, expected-UID mode 0600, with size **1..16384 raw bytes**.
+Ancestors must be root/configured-UID owned and not group/other writable; only the
+sticky `/tmp` fixture ancestor is excepted. Symlinks, unsafe ancestry/permissions,
+wrong owner/device, missing/inaccessible files, FIFO/device/directory entries,
+hardlinks and observed directory/file replacement or metadata instability deny.
+No permissions are repaired or paths created by the source.
+
+A lookup performs one positional bounded file read (at most recorded size plus one
+byte), checks named/opened identity, owner/mode/link/size/time metadata before and
+after the read, revalidates the anchored directory and returns an ordinary detached
+Buffer. Repeated calls actually reopen and revalidate; there is no byte, negative
+lookup or verification cache. A later complete atomic file replacement is read
+fresh; replacement during a read is rejected when observed. The source never lists,
+searches or glob-matches the directory and never reads Gateway agents/jobs files.
+There is no ingestion/placement writer, network/relay listener, subprocess, service,
+startup wiring, ambient configuration/env discovery or automatic fallback.
+
+Every lookup checks wall and monotonic clocks around the I/O, rejecting invalid or
+backward values and observed elapsed time greater than **100ms** on either clock.
+Defaults are `Date.now` and `performance.now`; optional clock functions are trusted
+construction inputs only. This is an observed per-lookup budget, not cancellation:
+a synchronous syscall can stall beyond the budget before the code regains control.
+No hard deadline, transactional revocation/ABA defense, hostile same-UID isolation
+or hardware power-loss guarantee follows from these checks. The existing accepted
+local status-only P5 limit and separately deferred issue #21 isolation remain.
+
+The Buffer is intentionally **untrusted raw event data**, not sanitized public output
+or a parsed/authenticated verdict. Do not print/log it as a receipt. This source
+performs no JSON, UTF-8, hash, signature, routing, expiry or authorization parsing.
+A1 rechecks those properties and exact request/event-ID/source binding on every
+read; even a different correctly signed event under the requested filename cannot
+satisfy the unchanged adapter. A2 independently rechecks current capability/subject
+policy. Filename, file mtime, successful read and owner placement are not proof of
+signer identity or current lifetime. Errors from constructor and lookup have only
+fixed `event_source_denied` code/message/stack, without paths, IDs, raw bytes or
+underlying exceptions. A1 converts source failure to `authorization_denied` before
+any next journal intent.
+
+The resulting chain is trusted local source configuration → untrusted candidate
+bytes → actual A1 signed request verification → actual A2 policy → journal DATA
+intent. The positive lifecycle integration now places synthetic raw event files
+and uses this actual resolver with the actual A6 writer/provider/journal. Explicit
+fake/error/Promise seams remain negative fixtures only. Tests cover fresh rereads,
+byte boundaries, ID rejection, permissions/links/file types, I/O faults, observed
+file/directory/size/time races, clocks and real A1 wrong-owner/signature/context/
+request/expiry denial. Deleting or replacing a file before outside-lock, inside-lock
+or later execution/Kaneo/Buzz authorization denies new intent without changing prior
+journal history. Missing/malformed event data does not prevent separate matching
+historical positive receipt recording; the next intent and complete replay still
+require valid current event authorization. A7's unknown-writer/candidate visibility
+and independent receipt-authority cases remain intact; this source adds no fence,
+recovery manager, journal repair or completion authority.
+
+Use the unchanged A7 provenance harness above for exact-head acceptance, including
+pinned Gateway install/check/full tests/build and full orchestration with **zero
+integration skips**. The ordinary Node suite deliberately reports dependency-bound
+integration skips when no harness build is supplied; report them honestly rather
+than treating that run as cross-repository acceptance. The new standalone resolver
+suite is `scripts/host-operator-event-source.test.mjs`. All files/events/identities
+in tests are disposable public fixture data; no operational credential or spool
+is accessed. A1/owner-event/authorization/protocol/journal, A4/A5 contract baseline,
+Gateway source, harness pin and dependency locks remain unchanged.
+
+H7 gains a real candidate-byte reader, **not live ingestion acceptance**. Before
+actual composition, the owner still must select/prove a non-secret event namespace,
+placement/retention custodian and complete atomic-placement procedure, reviewed
+installed code/config/source digest, actual UID/access/ancestry/storage/latency and
+how bytes arrive by exact ID. No ingest/writer or command for those tasks is invented
+here. H1–H9 remain operationally **NOT_READY**; native execution/termination/report
+receipts, host acceptance, independent review/CI and human operational approval are
+separate gates. No sudo, Docker/systemd, runtime/container/service, credentials,
+live ledger, Ready, approval, merge or deploy is performed by this slice.
+
+Source rollback removes the module/new tests and reverts integration/docs only,
+preserving journal/receipt/source/namespace bindings and real jobs authority. A
+future installed consumer must stop accepting new requests if its source is removed,
+not silently fall back to fake/in-memory authorization. No event-deletion procedure,
+pending-intent reset, administrative replay or stale-lock cleanup is provided.
