@@ -567,7 +567,7 @@ Buffer. Repeated calls actually reopen and revalidate; there is no byte, negativ
 lookup or verification cache. A later complete atomic file replacement is read
 fresh; replacement during a read is rejected when observed. The source never lists,
 searches or glob-matches the directory and never reads Gateway agents/jobs files.
-There is no ingestion/placement writer, network/relay listener, subprocess, service,
+A9 below adds a local placement library. There is no network/relay listener, subprocess, service,
 startup wiring, ambient configuration/env discovery or automatic fallback.
 
 Every lookup checks wall and monotonic clocks around the I/O, rejecting invalid or
@@ -593,7 +593,7 @@ any next journal intent.
 
 The resulting chain is trusted local source configuration → untrusted candidate
 bytes → actual A1 signed request verification → actual A2 policy → journal DATA
-intent. The positive lifecycle integration now places synthetic raw event files
+intent. The positive lifecycle integration uses the actual A9 placer for synthetic raw event files
 and uses this actual resolver with the actual A6 writer/provider/journal. Explicit
 fake/error/Promise seams remain negative fixtures only. Tests cover fresh rereads,
 byte boundaries, ID rejection, permissions/links/file types, I/O faults, observed
@@ -631,3 +631,72 @@ preserving journal/receipt/source/namespace bindings and real jobs authority. A
 future installed consumer must stop accepting new requests if its source is removed,
 not silently fall back to fake/in-memory authorization. No event-deletion procedure,
 pending-intent reset, administrative replay or stale-lock cleanup is provided.
+
+## A9: create-only local signed-event placement — live NOT_READY
+
+`createFileEventPlacer({directory, uid, ownerPubkey, targetPubkey, channelId,
+threadId, source, clock?})` from `host-operator-auth/event-placement.mjs`
+returns `{place(raw)}`. A trusted local caller supplies serialized string or
+ordinary detached Buffer bytes, bounded to 16KiB, without reserialization. Objects,
+proxies, accessors, extended/shared Buffers and caller-selected ID/path/options
+are rejected. The constructor fixes an existing canonical private directory,
+actual ordinary process UID and source/context; it creates no namespace or keys.
+
+The existing A1 verifier authenticates the raw signed status request and derives
+its public event ID internally; it rechecks freshness before publication. Placement
+does not query or assert current job policy. A8 reads bytes afresh, A1 verifies
+again, A2 checks current policy and the journal decides whether to emit a data
+intent. Placement is neither transport authentication nor execution/report receipt.
+Synchronous syscalls/crypto are not preemptible: expiry may pass during a syscall,
+and consumers independently enforce it. Invalid/backward clock readings deny.
+
+Publication uses a random exclusive same-directory private staging file, complete
+writes, file fsync, staged inode/metadata/byte checks, directory identity guards,
+then atomic create-only hardlink to the verified ID plus `.json`. Only this call's
+positively identified staging name is removed on the successful path. Parent fsync
+and exact final inode/bytes/private0600/UID/device/single-link readback precede
+confirmation. There is no overwrite rename, in-place copy, permission repair,
+unsupported-filesystem fallback, retry or global lock. Protected ancestors and
+exact0700 directory semantics match A8, including disposable sticky /tmp fixtures.
+Same-UID hostile administrators and physical power-loss guarantees remain outside
+this local trust model.
+
+| status | Meaning |
+| --- | --- |
+| confirmed / durability_confirmed | This call completed publication, parent fsync and final readback. |
+| already_present / durability_unproven | Safe existing bytes exactly match; no historical durability confirmation is invented. |
+| conflict | Existing safe bytes differ, including whitespace-only wire changes for the same event ID; unchanged. |
+| denied | No publication was attempted by this call; partial staging may remain. |
+| outcome_unknown | Link was attempted; publication/cleanup/fsync/readback is uncertain. |
+
+Results contain only fixed status/code and, after verification, public eventId.
+Errors never echo raw input, signature, private path/digest or upstream exception.
+Constructor errors use the fixed event_placement_denied code/message/stack.
+
+During publication's two-link interval A8 deliberately denies nlink2. A contender
+may also deny when it observes this interval. After own-stage unlink, nlink1 bytes
+may be A8-readable and A1-valid before parent fsync or after an unknown outcome.
+Visibility and current A2 eligibility do not prove durable placement. There is no
+automatic admission fence. EEXIST during a publication race is conservatively
+outcome_unknown; call-owned staging evidence remains. Subsequent identical input
+can only report already_present/unproven (or deny unsafe metadata), never confirm
+the earlier unknown operation. No stale-artifact cleanup, adoption, reconciliation,
+unpublication or rollback is performed. At most one create-only publisher can win
+one final name; this is not global exactly-once execution.
+
+Offline tests exercise real placer→A8→A1→A2/actual writer→journal, short writes,
+staged substitutions, unsafe metadata/parents, write/fsync/link/unlink/readback
+faults, independent concurrent processes and SIGKILL boundaries. Test-only hostile
+raw file replacements remain explicitly negative fixtures. A placement result
+cannot satisfy the journal's independent positive receipt verifier; historical
+receipts and every next-intent reauthorization retain their prior semantics.
+
+Per-event bounds do not bound namespace growth. Before live use the owner must
+choose and prove actual non-secret namespace/UID/custody, input transport,
+installation/source binding, same-device no-replace/fsync storage behavior,
+quota/retention ownership and ambiguous-publication investigation. No live path,
+service, ingest, executor, reporter, credential or ledger is selected or changed.
+All live H1–H9 remain NOT_READY; #21 isolation and #11 Ready workflow are separate.
+Source rollback removes the two A9 files and reverts integration/docs only; preserve
+all eventual event/journal/receipt evidence without deleting live files or supplying
+an authority fallback.
