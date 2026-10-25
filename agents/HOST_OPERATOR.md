@@ -788,3 +788,85 @@ integration/docs only; preserve all operational event/journal/receipt evidence a
 jobs authority. Never remove an orphan file/stale lock or invent fallback authority
 as part of rollback. Ready, approval, merge, deployment, runtime and credential
 changes are outside this implementation slice.
+
+## A11: process-free detached HEAD pointer observer — live NOT_READY
+
+`host-operator-auth/revision-source.mjs` exports
+`createDetachedRevisionObserver({sourceDirectory, uid, source, clock?, monotonic?})`
+with frozen `{observe()}`. This is a read-only observation primitive for one trusted
+constructor-selected source, with no import-time observation, CLI, listener,
+subprocess, Git invocation, environment/config discovery, operation registry,
+executor, journal access, receipt generation or integration wiring.
+
+Construction rejects nonordinary/proxy/accessor/symbol/unknown configuration and
+snapshots the existing protocol `binding(source)`. The actual ordinary Linux UID
+must match `uid`. `sourceDirectory` must be a bounded canonical absolute path, not
+an argument to `observe`. Each `observe()` accepts zero arguments, freshly checks
+the existing source/ancestor and literal `.git` directories, anchors both source
+and `.git` with no-follow/nonblocking directory descriptors, and opens only the
+fixed `.git/HEAD` file. No directory/ref/object/config/alternate search is provided.
+
+Directories/ancestors must be root/configured-UID owned, without group/other write
+or special mode bits; only the existing sticky-root `/tmp` disposable fixture
+exception applies. HEAD follows the approved same-ordinary-UID handoff: regular,
+single-link, same-device as the anchored `.git`, with no group/other write or
+special bits. Non-secret source metadata0600/0644 is supported; protected0755
+source/metadata directories are also supported. These are source metadata rules,
+not a relaxation of the private0700/0600 event/ledger/journal rules elsewhere.
+No mkdir/chmod/chown, source repair or permission adoption is performed.
+
+The one positional read is bounded to **42 bytes** and accepts only exactly40
+lowercase ASCII hexadecimal bytes, optionally followed by one LF. Root/metadata
+named and held descriptors, file named/opened metadata, owner/mode/device/link/
+size/time fingerprints and canonical ancestry are checked before/after reading.
+Observed metadata changes, short/overrun reads, substitutions, symlinks, gitfile/
+worktree indirection, bare/missing layout, symbolic `ref:` HEAD, uppercase SHA,
+CRLF/multiline/BOM/arbitrary text and I/O/close failures deny. No symbolic reference
+or packed-ref resolution, Git command or fallback to configured expectedSha occurs.
+
+A successful bounded public result contains only:
+
+```json
+{"status":"observed","repository":"test-org/project","workspaceId":"pointer-fixture","expectedSha":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","observedSha":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","observedAt":1800000000000}
+```
+
+`observed` means the actual detached pointer equals trusted `source.baseSha`;
+`mismatch` returns the actual different valid pointer with the same expectedSha.
+This is a **HEAD POINTER ONLY** observation. A synthetic pointer to a nonexistent
+object can be observed: it does not prove commit/object existence, tree hash,
+worktree cleanliness, repository origin, dependency/install integrity or actual
+sourceDigest correspondence. Logical repository/workspace fields are constructor
+mapping, not discovered Git facts. No PASS/READY/completed/execution receipt or
+current-policy verdict follows. Returned data cannot itself authorize dispatch or
+satisfy the journal's independent receipt authority.
+
+Every invocation reopens/rechecks; there is no byte/verdict/error cache. Invalid,
+backward or nonfinite clock readings and observed elapsed wall/monotonic time over
+**100ms** deny. `observedAt` is an integer from the final checked wall reading.
+The budget cannot interrupt a stalled synchronous syscall and does not enforce the
+registered5000ms whole-operation executor limit. External changes after the final
+check, malicious same-UID/host-admin writers and ABA/atomic revocation protection
+remain outside this local boundary. No child process is started; that does not
+establish a generic executor termination proof.
+
+Invalid/unavailable/unsupported reads and constructor failures throw only fixed
+`revision_source_denied` code/message/stack. Raw HEAD/error text, private paths,
+sourceDigest and other unverified source details are never returned. Tests use
+synthetic protected directories, actual reads/mismatch/rereads, unsafe layouts and
+metadata, positional-read/directory races, clock/I/O/close faults and canaries.
+No actual installed source or host inventory is selected by these tests.
+
+The unchanged full pinned harness remains regression acceptance with zero
+integration skips; ordinary disconnected skips are reported separately. A1–A10,
+registry/protocol/journal/receipt/Gateway/dependencies/harness stay unchanged.
+A future authorized consumer still needs exact pending-intent identity/current
+policy, observation-to-native-receipt binding and unknown/retry discipline. Actual
+source selection/UID/protected access/immutable installation/storage and consumer
+wiring require separate owner acceptance. All live H1–H9 remain NOT_READY;
+#21 isolation and #11 Ready workflow remain separate.
+
+Source rollback removes the observer/new tests and this section only, preserving
+real source/event/journal/receipt bindings and jobs authority. A future consumer
+must stop on observation failure, never echo expected SHA or manufacture a receipt.
+No operational rollback, deployment, runtime, credentials or live path mutation is
+part of this slice.
