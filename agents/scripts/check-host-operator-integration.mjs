@@ -5,8 +5,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 
-const gatewayHead = '59fca5e863c99dd44b7d8d0ad762e00f03402517';
-const gatewayTree = 'b1e1430793bcd26b02df9a77aa49a5b5ce16a24b';
+const gatewayHead = '9e1989010c80c04e15002adee8f49af5723ed02d';
+const gatewayTree = '882fcd06ebfbee442b20694ebb24035e861ca5c1';
 const base = '1b3bc2b41e2767273053e8e03bd89e9d3149d3e1';
 const orchestration = path.resolve(fileURLToPath(new URL('../..', import.meta.url)));
 // No inherited agent credentials, npm configuration, NODE_OPTIONS or transport.
@@ -42,7 +42,7 @@ function archive(source, head, destination) {
 function check(label, command, args, cwd, extra) {
   stage = label;
   const output = run(command, args, cwd, extra);
-  if (label === 'orchestration-test' && !/^# skipped 0$/m.test(output)) throw Error('integration_skipped');
+  if (['orchestration-test', 'integration-test', 'gateway-test'].includes(label) && !/^# skipped 0$/m.test(output)) throw Error('integration_skipped');
   fs.writeFileSync(path.join(scratch, label + '.log'), output + '\n', { mode: 0o600 });
   // Fixed summary only; never dump upstream errors, private paths or ledgers.
   console.log(JSON.stringify({ stage: label, status: 'pass',
@@ -83,6 +83,7 @@ try {
   const testEnv = { HOST_OPERATOR_TEST_GATEWAY_BUILD: gateway, TMPDIR: os.tmpdir() };
   const scripts = path.join(app, 'agents/scripts'), docker = path.join(app, 'agents/docker');
   const tests = [docker, scripts].flatMap(dir => fs.readdirSync(dir).filter(f => f.endsWith('.test.mjs')).sort().map(f => path.join(dir, f)));
+  check('integration-test', process.execPath, ['--test', path.join(scripts, 'host-operator-integration.test.mjs')], app, testEnv);
   check('orchestration-test', process.execPath, ['--test', ...tests], app, testEnv);
   // Compose rendering and App shell fixtures have host tool prerequisites.
   // Do not fabricate tools or claim an unavailable suite passed.
