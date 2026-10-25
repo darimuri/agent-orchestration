@@ -397,10 +397,11 @@ is created. C-prime issue #16, rollout and operational rollback remain outside A
 Source rollback removes only these A1 modules, dependency, tests and docs; preserve
 all existing journals and receipts and never resume production with fake policy.
 
-## A3: offline two-source admission conformance
+## A3 / A7: offline writer, admission and journal lifecycle conformance
 
 The test-only `scripts/check-host-operator-integration.mjs` closes the A2 DTO-only
-compatibility gap by composing the actual A1 signed-event adapter, the actual built
+compatibility gap. A7 extends it to compose the actual merged A6
+`createHostAdmissionWriter`, the actual A1 signed-event adapter, the actual built
 Gateway `createHostPolicySource`, and the actual journal. It imports no live config,
 starts no service, discovers no operational ledgers and executes no intent. Events
 use the public BIP-340 vector-0 test scalar, the resolver is an ID-indexed raw fixture,
@@ -413,20 +414,22 @@ Run from a **clean committed** orchestration checkout at the head being reviewed
 ```bash
 # Operator-supplied source checkout, not a host request or live ledger path.
 # This exact dependency HEAD/tree is mandatory; a moving main or existing dist is refused.
-gateway_source=/workspace/darimuri/github-app-agent-gateway-age7-a3-source
+gateway_source=/workspace/darimuri/github-app-agent-gateway-post-a6
 orchestration_head=$(git rev-parse HEAD)
 node agents/scripts/check-host-operator-integration.mjs "$gateway_source" "$orchestration_head"
 ```
 
 Pinned dependency: `darimuri/github-app-agent-gateway`
-`59fca5e863c99dd44b7d8d0ad762e00f03402517`, tree
-`b1e1430793bcd26b02df9a77aa49a5b5ce16a24b`. Orchestration must descend from A1 merge
+`9e1989010c80c04e15002adee8f49af5723ed02d`, tree
+`882fcd06ebfbee442b20694ebb24035e861ca5c1` (merged A6 jobs-only writer). Orchestration must descend from A1 merge
 `1b3bc2b41e2767273053e8e03bd89e9d3149d3e1`. The harness checks canonical origins,
 exact heads/trees, clean tracked and untracked source state, and rechecks them after
 validation. Both supplied source roots must be canonical paths. It archives the
 committed sources into private scratch, installs their unchanged locks using
 `npm ci --ignore-scripts --offline --no-audit --no-fund`, runs full Gateway
-`check`, `test`, `build`, then the full orchestration Node suite. It never fetches,
+`check`, `test`, `build`, then focused lifecycle integration and the full
+orchestration Node suite. Gateway, focused integration and full orchestration
+summaries must each show zero skips. It never fetches,
 checks out or installs packages in either supplied source.
 An offline npm cache containing both lockfiles' dependencies is a prerequisite;
 a cache miss is a failure, never a reason to fetch or weaken the pin.
@@ -453,7 +456,7 @@ clock units, timeout without termination proof, historical positive receipt afte
 expiry/revocation, and canary/hash/path non-disclosure. Only fixed `status.revision`
 requests can reach admission. Without the harness-provided private build, these new
 cross-repository tests explicitly skip in ordinary Node runs; a run with those skips
-is **not** A3 integration evidence. The harness run must report zero skipped tests.
+is **not** A3/A7 integration evidence. The harness run must report zero skipped tests.
 
 This demonstrates offline composition against pinned real code, not live host policy
 or receipt authority. Immutable installation/artifact verification, trusted UID/path
@@ -463,7 +466,56 @@ executor/process/resource controls and native Buzz/Kaneo receipts remain host ga
 Independent exact-head Reviewer/CI and human approval remain separate. No live
 capability, endpoint, runner, validate/reporting, root/Docker/systemd or runtime is
 installed. Reverting only these tests/harness/docs and discarding their scratch rolls
-back A3 source; preserve all operational journals/receipts. Overall AGE #7 is incomplete.
+back these A3/A7 source changes; preserve Gateway writer code and all operational
+journals/receipts. Overall AGE #7 is incomplete.
+
+### A7 evidence and the administrative unknown-outcome boundary
+
+The lifecycle fixtures start with no capability, then use the **actual built writer**
+with constructor-selected synthetic path/UID/owner/task/source/descriptor policy.
+Confirmed set makes the same valid signed request eligible for one durable status
+DATA intent; all non-capability and forge fields, including unrelated jobs and absent
+defaults, remain unchanged. Confirmed remove is scheduled before outside-lock and
+inside-lock authorization at execution and both later report boundaries. Denial
+preserves journal history. Reopened pending execution/Kaneo/Buzz intents stay unknown
+without duplicate effects; separately verified historical positive receipts can
+still record after removal, while the next intent remains denied. Complete replay
+under valid policy emits no new effect. Signed-event, disabled/expired subject,
+binding and unsafe-file failures still pass through real A1/A2 denial.
+
+Positive capability grant/removal uses no copied writer and no raw fixture rewrite.
+Existing malformed/hostile ledger and disabled-agent cases deliberately retain raw
+synthetic replacement as attacker/fault inputs, not durable administrative evidence.
+Stale raw-byte digest conflict and denied mutation are checked without changing the
+active file. Writer confirmed/conflict/denied/unknown results, reconciliation DTOs,
+signed events and current-policy facts cannot normalize into execution or native
+report receipts, even when a fixture receipt adapter returns them. No actual intent
+consumer, native publisher or live transport is installed or called.
+
+A synthetic post-rename parent-fsync failure explicitly produces
+`outcome_unknown` with a visible candidate and retained writer lock. Read-only
+reconciliation reports `visibility:candidate`, `durability:unproven` and blocked
+administrative coordination, without changing bytes/artifacts. **A2 does not consume
+writer outcome or lock/durability state; the journal does not consume administrative
+write results.** The same visible candidate can pass real A1/A2 and permit a DATA
+intent. This test exposes the existing separation; it is neither a durable recovery
+claim nor an automatic policy denial/fence. A test driver can stop on unknown, but
+no installed production driver/fence exists here. Live administrative sequencing,
+unknown-commit recovery and startup consumption require explicit host procedure and
+separate acceptance. There is no automatic administrative retry, cleanup, rollback,
+lock adoption or recovery sync in this phase.
+
+Confirmed administration alone proves neither enabled agent policy, valid raw event,
+execution/termination nor native receipt delivery. Cooperative writer locking and
+expected-byte comparison are not universal CAS against uncooperative same-UID actors.
+Actual storage/power-loss/latency, all real jobs-writer coordination, agents/token
+rotation and cross-file recovery remain H4/H5/H6 gates. H1–H9 live outcomes remain
+**NOT_READY**; A5's deliberately pinned A4 contract baseline is unchanged. Stronger
+identity/isolation remains deferred to issue #21; Gateway Ready defect #11 is separate.
+No Gateway/production/schema/dependency/lock/runtime/credential/live-ledger changes
+are part of this three-file conformance slice. Rollback reverts only its test/harness/
+docs, preserving writer source and operational evidence; independent exact-head
+review/CI/human merge remain separate from operational approval and activation.
 
 ## A4: host acceptance preparation — NOT READY
 
