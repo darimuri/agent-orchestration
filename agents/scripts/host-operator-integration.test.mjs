@@ -7,6 +7,7 @@ import { pathToFileURL } from 'node:url';
 import { createHash } from 'node:crypto';
 import test from 'node:test';
 import { schnorr } from '../host-operator-auth/node_modules/@noble/curves/secp256k1.js';
+import { createLocalEventIngress } from '../host-operator-auth/local-ingress.mjs';
 import { createFileEventPlacer } from '../host-operator-auth/event-placement.mjs';
 import { createFileEventResolver } from '../host-operator-auth/event-source.mjs';
 import { createAuthorizationAdapter } from '../host-operator-auth/authorization.mjs';
@@ -47,7 +48,7 @@ function state() {
       allowedOperations: ['status.revision'], expiresAt: new Date(now + 1800000).toISOString() } },
     { id: 'legacy-job', agentId: 'reviewer-1', role: 'reviewer', repository: 'test-org/legacy', status: 'completed', expiresAt: new Date(now - 1).toISOString() }] } };
 }
-function fixture(t, { grant = true } = {}) {
+function fixture(t, { grant = true, preplace = true } = {}) {
   assert.notEqual(process.getuid(), 0, 'ordinary UID required');
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'host-composition-')); fs.chmodSync(directory, 0o700);
   t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
@@ -84,14 +85,17 @@ function fixture(t, { grant = true } = {}) {
   const provider = createHostPolicySource(options);
   let current = (...args) => { calls++; hook(calls); return provider(...args); };
   const placer = createFileEventPlacer({ directory: eventDir, uid: process.getuid(), ownerPubkey, targetPubkey, channelId, threadId, source, clock: () => clock });
-  const placement = placer.place(JSON.stringify(event));
-  assert.equal(placement.status, 'confirmed');
+  const placement = preplace ? placer.place(JSON.stringify(event)) : null;
+  if (preplace) assert.equal(placement.status, 'confirmed');
   let eventReads = 0, eventHook = () => {};
   const resolveEvent = createFileEventResolver({ directory: eventDir, uid: process.getuid(), clock: () => clock, monotonic: () => 0 });
   const adapterOptions = { ...owner, channelId, threadId, source, clock: () => clock,
     resolveEvent: id => { eventHook(++eventReads); return resolveEvent(id); }, currentJob: (...args) => current(...args) };
   const adapter = createAuthorizationAdapter(adapterOptions);
   const journal = () => new HostOperatorJournal({ directory: journalDir, source, ownerPubkey, authorize: adapter, clock: () => clock,
+    verifyReceipt: evidence => { if (!receipts.has(evidence.ref)) throw Error(canary + directory); return receipts.get(evidence.ref); } });
+  const ingress = () => createLocalEventIngress({ eventDirectory: eventDir, journalDirectory: journalDir, uid: process.getuid(),
+    ...owner, channelId, threadId, source, currentJob: (...args) => current(...args), clock: () => clock, monotonic: () => 0,
     verifyReceipt: evidence => { if (!receipts.has(evidence.ref)) throw Error(canary + directory); return receipts.get(evidence.ref); } });
   function evidence(plan, outcome = 'success') {
     const ref = 'proof-' + receipts.size;
@@ -101,7 +105,7 @@ function fixture(t, { grant = true } = {}) {
     return { ref };
   }
   const disk = () => fs.existsSync(path.join(journalDir, 'state.json')) ? fs.readFileSync(path.join(journalDir, 'state.json'), 'utf8') : '';
-  return { r, directory, journalDir, agentsFile, jobsFile, eventDir, eventFile, hostileEvent, placer, placement, write, writer, command, admin, privateDigests, journal, evidence, receipts, disk, adapter, adapterOptions, provider,
+  return { r, directory, journalDir, agentsFile, jobsFile, eventDir, eventFile, hostileEvent, placer, placement, write, writer, command, admin, privateDigests, journal, ingress, evidence, receipts, disk, adapter, adapterOptions, provider,
     time: value => { clock = value; }, event: value => { event = value; hostileEvent(value, r.authorizationEventId); if (value.id !== r.authorizationEventId) hostileEvent(value); },
     eventHook: fn => { eventHook = fn; },
     hook: fn => { hook = fn; }, monotonic: fn => { monotonic = fn; }, current: fn => { current = fn; } };
@@ -386,4 +390,52 @@ integration('real placement unknown is separate from A8 visibility, A2 eligibili
       f.admin('remove'); denied(f);
     }
   }
+});
+
+integration('A10 actual ingress composes confirmed A9 -> A8/A1 -> real A2/writer -> one journal DATA intent', t => {
+  const f = fixture(t, { preplace: false }), ingress = f.ingress();
+  assert(!fs.existsSync(f.eventFile(f.r.authorizationEventId))); assert.equal(f.disk(), '');
+  const result = ingress.ingest(JSON.stringify(signed())); assert.equal(result.status, 'intent'); assert.equal(result.intent.step, 'execution'); noLeaks(f, result);
+  const pending = f.disk(); assert.equal(ingress.ingest(JSON.stringify(signed())).status, 'placement_unconfirmed'); assert.equal(f.disk(), pending);
+  assert.throws(() => f.journal().record(f.r, result), e => e.code === 'receipt_invalid');
+  const proof = f.evidence(result); fs.unlinkSync(f.eventFile(f.r.authorizationEventId)); f.time(now + 600000);
+  assert.equal(f.journal().record(f.r, proof).status, 'recorded'); denied(f);
+  assert.equal(ingress.ingest(JSON.stringify(signed())).status, 'ingress_denied');
+});
+for (const at of [1, 2]) integration(`A10 confirmed placement cannot cache past actual writer revocation before policy check ${at}`, t => {
+  const f = fixture(t, { preplace: false }), ingress = f.ingress(); let changed = 0;
+  f.hook(call => { if (call === at) { assert.equal(f.admin('remove').status, 'confirmed'); changed++; } });
+  const result = ingress.ingest(JSON.stringify(signed())); assert.equal(result.status, 'admission_denied'); assert.equal(changed, 1); assert.equal(f.disk(), '');
+  assert.equal(fs.readFileSync(f.eventFile(f.r.authorizationEventId), 'utf8'), JSON.stringify(signed())); noLeaks(f, result);
+});
+integration('A10 valid placement does not grant disabled/expired/missing/misbound actual A2 policy', t => {
+  for (const fault of ['disabled', 'expired', 'missing', 'wrong-binding']) {
+    const f = fixture(t, { preplace: false, grant: fault !== 'missing' });
+    if (fault !== 'missing') {
+      const state = JSON.parse(fs.readFileSync(f.jobsFile, 'utf8')), agents = JSON.parse(fs.readFileSync(f.agentsFile, 'utf8'));
+      if (fault === 'disabled') agents.agents[0].disabled = true;
+      if (fault === 'expired') state.jobs[0].hostAdmission.expiresAt = new Date(now).toISOString();
+      if (fault === 'wrong-binding') state.jobs[0].hostAdmission.taskId = 'different-task';
+      f.write({ agents, jobs: state }); // Explicit hostile administrative fixture, not a production grant.
+    }
+    const result = f.ingress().ingest(JSON.stringify(signed())); assert.equal(result.status, 'admission_denied'); noLeaks(f, result); assert.equal(f.disk(), ''); assert(fs.existsSync(f.eventFile(f.r.authorizationEventId)));
+  }
+});
+integration('A10 unknown visible candidate never advances this coordinator although direct journal eligibility remains separate', t => {
+  const f = fixture(t, { preplace: false }), ingress = f.ingress(), original = fs.fsyncSync;
+  fs.fsyncSync = fd => { if (fs.fstatSync(fd).isDirectory()) throw Error(canary + f.directory); return original(fd); };
+  let result; try { result = ingress.ingest(JSON.stringify(signed())); } finally { fs.fsyncSync = original; }
+  assert.equal(result.status, 'placement_unconfirmed'); noLeaks(f, result); assert.equal(f.disk(), '');
+  assert.equal(ingress.ingest(JSON.stringify(signed())).status, 'placement_unconfirmed'); assert.equal(f.disk(), '');
+  const direct = f.journal().next(f.r); assert.equal(direct.status, 'intent'); assert.equal(direct.intent.step, 'execution');
+  // Direct journal API is a separate authority boundary; ingress adds no universal filesystem fence.
+});
+integration('A10 journal persistence lost response never returns placement success or retries an admitted effect', t => {
+  const f = fixture(t, { preplace: false }), ingress = f.ingress(), original = fs.renameSync;
+  fs.renameSync = (...args) => { const result = original(...args); if (args[1] === path.join(f.journalDir, 'state.json')) throw Error(canary + f.directory); return result; };
+  let result; try { result = ingress.ingest(JSON.stringify(signed())); } finally { fs.renameSync = original; }
+  assert.deepEqual(result, { status: 'outcome_unknown', code: 'journal_unconfirmed' }); noLeaks(f, result);
+  const before = f.disk(); assert.equal(Object.values(JSON.parse(before).entries)[0].effects.length, 1);
+  assert.equal(ingress.ingest(JSON.stringify(signed())).status, 'placement_unconfirmed'); assert.equal(f.disk(), before);
+  assert.equal(f.journal().next(f.r).status, 'outcome_unknown');
 });

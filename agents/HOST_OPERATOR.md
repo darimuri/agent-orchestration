@@ -700,3 +700,91 @@ All live H1–H9 remain NOT_READY; #21 isolation and #11 Ready workflow are sepa
 Source rollback removes the two A9 files and reverts integration/docs only; preserve
 all eventual event/journal/receipt evidence without deleting live files or supplying
 an authority fallback.
+
+## A10: one-shot local raw-event ingress — live NOT_READY
+
+`host-operator-auth/local-ingress.mjs` exports the synchronous production composition
+`createLocalEventIngress({eventDirectory, journalDirectory, uid, ownerPubkey,
+requesterId, mentionPubkey, targetPubkey, channelId, threadId, source, currentJob,
+verifyReceipt, clock?, monotonic?}) -> frozen {ingest(raw)}`. Importing it starts
+nothing. A trusted in-process caller supplies one serialized event; there is no
+CLI/stdin endpoint, transport, listener, service, executor or native reporter.
+
+Construction snapshots ordinary own configuration/source data and fixes distinct,
+canonical, existing private0700 event and journal namespaces at the actual ordinary
+UID. Neither namespace may contain the other. It rejects proxies/accessors/symbols,
+unknown options, unsafe ancestry and missing currentJob/verifyReceipt functions.
+It creates/repairs no directory and accepts no caller-selected placer or journal.
+The same frozen source/context and checked nondecreasing wall clock feed the actual
+A9 placer, A8 resolver, A1 adapter and HostOperatorJournal. Optional monotonic clock
+is the existing A8 observed lookup-budget seam, not an ingress-wide timeout.
+
+`ingest(raw)` takes exactly one string or ordinary detached Buffer of1..16384 raw
+UTF-8 bytes. It rejects parsed objects, proxies, shared/extended/getter Buffers,
+extra arguments and UTF-8 BOM before verification. The bounded snapshot is copied
+before callbacks can mutate caller bytes. Actual A1 validates/derives the request
+and event ID; no caller-supplied request or verified flag is accepted. Actual A9
+receives the same snapshot exactly once. Only **this invocation's** matching
+`confirmed/durability_confirmed` result permits one actual `journal.next(request)`.
+That API reopens A8 and reruns A1/currentJob outside and inside its lock. Placement
+proof never substitutes for fresh current A2 policy and never grants a capability.
+
+| Input/outcome | Ingress result and effect |
+| --- | --- |
+| Raw/A1 denial | `ingress_denied`; no placement or journal call. |
+| Existing identical bytes / unknown placement | `placement_unconfirmed`; zero journal calls. |
+| Existing different wire bytes | `placement_conflict`; zero journal calls. |
+| Placement denial / unexpected placement result | `placement_denied`; zero journal calls; staging evidence may remain. |
+| Confirmed placement, current authorization denial | `admission_denied`; candidate remains, no new intent. |
+| Known journal reservation/conflict/limit | `blocked` with fixed allowlisted code. |
+| Journal I/O/unconfirmed persistence/unknown error or malformed result | `outcome_unknown/journal_unconfirmed`; pending disk state may exist. |
+| Normal durable journal result | Existing bounded public DATA `intent`, `outcome_unknown`, `blocked` or `complete` shape. |
+
+Public projection checks exact result/intent/public-receipt fields, source/request
+bindings, intent digest and primitive bounds before returning detached data. No raw
+event body/signature, private path/ledger identifiers/digests, callback error text,
+arbitrary summaries or stack is returned. Constructor errors have fixed
+`ingress_denied` code/message/stack. Projection is not a second journal schema or a
+receipt verifier: the existing journal validates its state and independent receipt
+authority. This composition calls neither `record` nor verifyReceipt and exposes
+no receipt endpoint. A DATA intent is not operation execution or delivery success.
+
+This is deliberately **not transparent replay/resume**: identical retransmission
+stops at already_present/unproven even if a previous response was lost, policy is
+now valid, or the journal holds a pending/completed request. No retry, adoption,
+re-fsync, file/temp deletion, rollback, namespace switch, cache or recovery manager
+is provided. Existing direct journal APIs retain their separate semantics. A fresh
+confirmed placement can legitimately reach existing journal pending/report/complete
+states if an authorized external fixture/operator supplied that file lifecycle;
+ingress itself does not create that recovery procedure.
+
+Placement and admission are not one transaction. SIGKILL after confirmed placement
+but before journal.next leaves a file without admission; SIGKILL/persistence or
+response failure after journal writes may leave an unresolved pending effect with
+no returned intent. Resubmission still stops at the pre-existing file, preserving
+both namespaces and any stale journal evidence. A visible nlink1 unknown candidate
+may remain A8-readable/A1-valid/A2-eligible to separate direct journal code. This
+coordinator's confirmed-only rule is not a universal admission fence or a claim of
+global exactly-once execution. Synchronous syscalls/crypto may stall, and revocation
+is not transactionally atomic across components. Same-UID malicious code is outside
+this trusted local composition boundary.
+
+Offline tests cover real sequencing and exactly-one calls, raw/config safety and
+snapshot mutation, actual A1 rejection, A9 write/link/unlink/sync/readback faults,
+current policy/file rechecks, sanitizer failures, concurrent identical ingress and
+placement/journal/response SIGKILL splits. The separate pinned integration path
+uses actual Gateway A2 provider/A6 writer; standalone policy DTOs are explicitly
+fixtures. Existing direct A1–A9 conformance and historical receipt tests remain.
+Run the unchanged exact-head harness for Gateway check/full tests/build and full
+orchestration with zero integration skips; ordinary runs report disconnected
+integration skips separately and honestly.
+
+Actual local invocation still needs owner acceptance of disjoint namespaces/UID,
+installed immutable code/source bindings, input custody/transport, storage capacity,
+quota/retention and split-outcome investigation. No such live value, service or
+activation is selected here. H1–H9 remain live NOT_READY; #21 isolation and #11 Ready
+workflow remain separate. Source rollback removes coordinator/new tests and reverts
+integration/docs only; preserve all operational event/journal/receipt evidence and
+jobs authority. Never remove an orphan file/stale lock or invent fallback authority
+as part of rollback. Ready, approval, merge, deployment, runtime and credential
+changes are outside this implementation slice.
