@@ -1,5 +1,6 @@
 // One new-event invocation; observation is non-consuming and never a receipt.
 import { types } from 'node:util';
+import { verifyOwnerEvent } from './owner-event.mjs';
 import { createRevisionObservationBridge } from './revision-observation.mjs';
 import { createLocalEventIngress } from './local-ingress.mjs';
 import { binding, descriptor, digest, exact, bounded, identifier, hexadecimal, timestamp } from '../scripts/host-operator-protocol.mjs';
@@ -82,6 +83,7 @@ export function createLocalRevisionInvocation(options) {
     const operation = descriptor({ ...config.source, operationId: 'status.revision' }, config.source);
     const bridge = createRevisionObservationBridge(config); // Source preflight BEFORE any admission.
     const ingress = createLocalEventIngress(Object.fromEntries([...required.filter(k => k !== 'sourceDirectory'), 'clock', ...(Object.hasOwn(config, 'monotonic') ? ['monotonic'] : [])].map(k => [k, config[k]])));
+    const context = Object.freeze(Object.fromEntries(['ownerPubkey', 'requesterId', 'mentionPubkey', 'targetPubkey', 'channelId', 'threadId', 'source'].map(k => [k, config[k]])));
     let inFlight = false;
     return Object.freeze({ invoke(raw) {
       if (inFlight) denied();
@@ -98,6 +100,24 @@ export function createLocalRevisionInvocation(options) {
       } catch {
         if (stage === 'input') denied();
         return stopped(stage, stage === 'observation' ? 'revision_observation_denied' : 'admission_unconfirmed', stage === 'observation' ? admitted.expected : undefined);
+      } finally { inFlight = false; }
+    }, resume(raw, locator) {
+      if (inFlight) denied();
+      inFlight = true; let stage = 'input';
+      try {
+        if (arguments.length !== 2) denied();
+        // Detach BOTH untrusted inputs before the first trusted clock/provider call.
+        const snapshot = rawSnapshot(raw), expected = data(locator);
+        exact(expected, ['intentId', 'intentDigest']); identifier(expected.intentId); hexadecimal(expected.intentDigest);
+        bounded(expected, 4096);
+        stage = 'resume';
+        const proof = verifyOwnerEvent(snapshot, { ...context, now: config.clock() });
+        const actual = observation(bridge.observe(snapshot, expected), { expected, requestHash: digest(proof.request) }, operation);
+        const result = { status: actual.status, admittedIntent: expected, observation: actual };
+        bounded(result, 8192); return frozen(result);
+      } catch {
+        if (stage === 'input') denied();
+        return stopped('resume', 'revision_observation_denied');
       } finally { inFlight = false; }
     } });
   } catch { denied(); }
