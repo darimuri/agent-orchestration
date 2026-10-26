@@ -1,5 +1,6 @@
 // Verifies independently resolved terminal evidence; never produces execution proof.
 import { types } from 'node:util';
+import { isSupervisedResolver } from './revision-evidence.mjs';
 import { binding, request, identity, descriptor, receipt, digest, exact, bounded, identifier, hexadecimal, timestamp } from '../scripts/host-operator-protocol.mjs';
 
 const denied = () => { const e = Error('revision_completion_denied'); e.code = 'revision_completion_denied'; e.stack = 'revision_completion_denied'; throw e; };
@@ -17,10 +18,15 @@ function data(value, depth = 0, budget = { nodes: 0, bytes: 0 }) {
 }
 export function createRevisionCompletionVerifier(options) {
   try {
-    const config = own(options); if (Object.keys(config).some(k => !['source', 'authorityId', 'resolveCompletion', 'clock'].includes(k)) ||
+    const config = own(options); if (Object.keys(config).some(k => !['source', 'authorityId', 'resolveCompletion', 'clock', 'supervised'].includes(k)) ||
       ['source', 'authorityId', 'resolveCompletion'].some(k => !Object.hasOwn(config, k)) || typeof config.resolveCompletion !== 'function' ||
       (config.clock !== undefined && typeof config.clock !== 'function')) denied();
     const source = Object.freeze(binding(data(config.source))), authority = config.authorityId, resolve = config.resolveCompletion, selectedClock = config.clock ?? Date.now;
+    let supervised;
+    if (Object.hasOwn(config, 'supervised')) {
+      supervised = data(config.supervised); exact(supervised, ['issuerArtifactDigest', 'workerArtifactDigest', 'clockId']);
+      hexadecimal(supervised.issuerArtifactDigest); hexadecimal(supervised.workerArtifactDigest); identifier(supervised.clockId);
+    }
     identifier(authority); let previous = -1;
     const clock = () => { const now = selectedClock(); timestamp(now); if (now < previous) denied(); previous = now; return now; };
     return function verify(evidence, intent, context) {
@@ -36,13 +42,17 @@ export function createRevisionCompletionVerifier(options) {
             i.deadline !== i.createdAt + d.timeoutMs || digest(i.payload.descriptor) !== digest(d)) denied();
         clock(); // All caller data is detached before any trusted callback.
         const proof = data(resolve(locator.ref)), now = clock(); bounded(proof, 8192);
-        exact(proof, ['version', 'type', 'authorityId', 'completionId', 'requestHash', 'intentId', 'intentDigest', 'descriptorDigest', 'startedAt', 'finishedAt', 'outcome', 'execution', 'resultDigest', 'summary']);
+        const v2 = proof.version === 2;
+        exact(proof, ['version', 'type', 'authorityId', 'completionId', 'requestHash', 'intentId', 'intentDigest', 'descriptorDigest', 'startedAt', 'finishedAt', 'outcome', 'execution', 'resultDigest', 'summary', ...(v2 ? ['issuerArtifactDigest', 'clockId'] : [])]);
+        if (v2 && (!supervised || !isSupervisedResolver(resolve, { source, authorityId: authority, ...supervised }) || proof.issuerArtifactDigest !== supervised.issuerArtifactDigest || proof.clockId !== supervised.clockId)) denied();
         identifier(proof.completionId); hexadecimal(proof.resultDigest); timestamp(proof.startedAt); timestamp(proof.finishedAt);
-        exact(proof.execution, ['kind', 'settled', 'descendants']);
+        exact(proof.execution, ['kind', 'settled', 'descendants', ...(v2 ? ['runId', 'boundaryId', 'boundaryDigest', 'workerArtifactDigest'] : [])]);
+        if (v2) { identifier(proof.execution.runId); identifier(proof.execution.boundaryId); hexadecimal(proof.execution.boundaryDigest);
+          if (proof.completionId !== proof.execution.runId || proof.execution.workerArtifactDigest !== supervised.workerArtifactDigest) denied(); }
         exact(proof.summary, ['passed', 'failed', 'skipped', 'exitCode', 'signal']);
-        if (proof.version !== 1 || proof.type !== 'host-operator.revision-completion' || proof.authorityId !== authority ||
+        if ((!v2 && proof.version !== 1) || proof.type !== 'host-operator.revision-completion' || proof.authorityId !== authority ||
             proof.requestHash !== digest(r) || proof.intentId !== i.intentId || proof.intentDigest !== digest(i) || proof.descriptorDigest !== digest(d) ||
-            !['success', 'failed'].includes(proof.outcome) || proof.execution.kind !== 'in_process_read_only' || proof.execution.settled !== true || proof.execution.descendants !== 0 ||
+            !['success', 'failed'].includes(proof.outcome) || proof.execution.kind !== (v2 ? 'supervised_process_v1' : 'in_process_read_only') || proof.execution.settled !== true || proof.execution.descendants !== 0 ||
             proof.startedAt < i.createdAt || proof.finishedAt < proof.startedAt || proof.finishedAt > now || (proof.outcome === 'success' && proof.finishedAt >= i.deadline) ||
             ['passed', 'failed', 'skipped'].some(k => proof.summary[k] !== 0) || proof.summary.exitCode !== null || proof.summary.signal !== null || digest(proof) !== locator.digest) denied();
         return receipt({ version: 1, receiptId: proof.completionId, intentId: i.intentId, intentDigest: digest(i), requestHash: digest(r), step: 'execution',

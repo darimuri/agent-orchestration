@@ -1269,3 +1269,154 @@ this opt-in hook and reverts source/tests/docs; unchanged stored receipts/schema
 readable and incomplete lifecycles conservatively hold as before. Preserve all
 already-admitted work/state/receipts; disabling cannot undo a previously issued new
 execution. No namespace reset or operational rollback is supplied.
+
+### A16 supervised revision source and fixture evidence (not installed)
+
+A16 supplies one fixed `status.revision` producer conditional on an owner-trusted
+supervisor. It does not supply a production supervisor, cgroup backend, configuration
+loader, public CLI, installer, service or live activation. H1–H9 remain NOT_READY.
+The fixture supervisor runs a real fixed child and observes its close/reap event;
+its no-escape, sealed and empty-boundary assertions are **synthetic**. These tests
+are not host/kernel/cgroup quiescence acceptance.
+
+`createSupervisedRevisionIssuer(options)` returns frozen `{issue(raw, locator)}`.
+`issue` is async; the only request inputs are signed raw bytes (1–16384) and exact
+`{intentId,intentDigest}` lookup data. They are detached before trusted callbacks.
+The constructor requires the existing fixed event/journal/source paths, ordinary UID,
+owner/requester/mention/target/channel/thread/source bindings and actual `currentJob`,
+plus `evidenceDirectory`, `authorityId`, `issuerArtifactDigest`,
+`workerArtifactDigest`, `clockId`, `supervisor` and `settlementWaitMs` (1–60000).
+Optional `clock`/`monotonic` are fixed owner-trusted providers. No construction values
+are discovered from request JSON. Issuer and worker pins must match their actual
+fixed source bytes; runtime/dependency inventory remains a future supervisor and
+host acceptance obligation. Source/event/journal/evidence roots must be protected,
+canonical, distinct and nonnested. The factory installs nothing.
+
+Actual owner-event verification, file event resolution, current authorization and
+A12 pending inspection derive the existing revision intent and original 5000ms
+deadline. The inspector has a deny-only receipt verifier. No admission, raw placement,
+observation adoption, record, release or reporting occurs inside the issuer. A durable
+exclusive intent claim precedes a second authorization/pending inspection. Any claim
+prevents reexecution, including crashes and prelaunch failures. Reentry/concurrent
+calls on an instance fail closed; independent instances serialize through custody.
+There is no retry, discovery, stale-lock cleanup, claim reset or deadline renewal.
+
+The mandatory supervisor is exactly `{run(spec)}`. There is no default simulated or
+production backend. Its async port receives an immutable issuer-built specification:
+fixed `process.execPath` and repo-owned worker entry; canonical private input containing
+only source path/UID/source binding, run nonce/request/intent digests and the parent's
+wall sample; fixed LANG/TZ environment; input8192/stdout4096/stderr4096 limits; worker
+artifact/clock/run binding, original deadline and bounded settlement wait. No inherited
+credential/config/NODE_OPTIONS environment, caller argv/cwd/shell, raw event, ledger
+or callbacks are passed. The worker uses the actual A11 detached HEAD observer once,
+without Git, shell, subprocesses or network. Its observation timestamp is anchored
+to the parent's supplied sample; it is result data, never completion-time authority.
+A11's independent elapsed read budget still applies. Results remain pointer-only:
+no object/tree/dirty/origin/install/sourceDigest integrity claim is implied.
+
+The port returns bounded exact `{status:'settled',boundary,stdout,stderr}` or an
+unconfirmed result. It owns launch/output/deadline stop, actual artifact/runtime
+verification, containment-before-operation, dedicated never-reused boundary identity,
+no escape/reattachment/untracked descendants, reaping and positive terminal emptiness.
+Leader exit, EOF, kill request, timeout or populated=0 alone is insufficient. A future
+backend must substantiate every boundary assertion against actual kernel evidence.
+No journal or evidence lock is held during supervisor/worker execution. Journal→
+evidence resolution under record/admission is allowed; evidence code calls no journal
+or policy callback under its lock, avoiding inverse lock order.
+
+Boundary v1 is exact `{version,runId,boundaryId,requestHash,intentDigest,
+workerArtifactDigest,clockId,startedAt,leaderExitedAt,settledAt,leaderReaped,noEscape,
+sealed,populated,exitCode,signal}`. It requires reaped/noEscape/sealed true, populated0,
+ordered times and either exitCode0–255 with null signal, or null exitCode with
+SIGTERM/SIGKILL. The issuer binds it to the claimed run/request/intent/worker/clock
+and parent-observed interval. Wall and monotonic reversals deny. Success requires
+normal exit0, a bounded actual observed/mismatch result, and final real authorization/
+pending verification before the original deadline (also bounded by monotonic elapsed
+time). SHA mismatch is a successful completed observation. Parent `finishedAt` follows
+settlement/final verification; storage durability can finish later without renewing it.
+
+Positively settled nonzero/signal/protocol/output failure, late completion or denied
+final postcondition produces only a fixed failed result with code `worker_failed`,
+`output_limit`, `deadline_exceeded` or `postcondition_denied`; it suppresses SHA and
+stderr. Failed proof may finish late. Unproven settlement, escape/live descendants,
+unreaped worker, attribution/provenance/clock failure or wait expiry returns frozen
+`{status:'unknown',code:'issue_unconfirmed'}` and publishes no completion proof.
+Late supervisor resolution has no background publication continuation. The supervisor
+still owns containing/stopping its run. Unknown publication means writes may have
+happened; it never asserts rollback or that no artifact exists.
+
+Confirmed issuance returns frozen `{status:'issued',outcome,evidence:{ref,digest}}`.
+The caller must explicitly compose independent resolution, verification and the
+existing journal record; issuance itself leaves journal bytes/mtime untouched.
+Successful result is the exact A11 observation plus runId/requestHash/intentDigest;
+failed result is exact `{status:'failed',code,runId,requestHash,intentDigest}`.
+
+New proof version2 retains type `host-operator.revision-completion` and v1 fields,
+adding `issuerArtifactDigest` and `clockId`. Its execution is exactly
+`{kind:'supervised_process_v1',settled:true,descendants:0,runId,boundaryId,
+boundaryDigest,workerArtifactDigest}`; completionId=runId. Result and boundary hashes
+are transitive proof-root bindings. Summary remains zero counts/null exit/null signal;
+actual terminal status lives in the boundary, not fabricated test receipt fields.
+The normalized execution receipt remains the existing v1 schema.
+
+`createRevisionCompletionVerifier` accepts optional exact
+`supervised:{issuerArtifactDigest,workerArtifactDigest,clockId}`. Default remains v1
+only. v2 additionally requires the actual evidence store's independently branded
+resolver with matching source/authority/artifact/clock pins; a generic callback that
+returns loose v2 proof JSON cannot substitute for complete retained bundle validation.
+Explicit opt-in preserves exact v1 `in_process_read_only` behavior, never relabels v1,
+and rejects unknown kinds/versions or inconsistent source/request/intent/time/result
+bindings. Wire the same extended verifier to execution `verifyReceipt` and
+`verifyRevisionCompletion`; report steps still need separate genuine authorities.
+The unchanged record durably persists normalized receipt before later admission
+revalidates it. Existing Kaneo→Buzz obligations, invoke/resume and historical semantics
+remain unchanged. Expired authorization may reconcile historical proof but cannot
+admit a new effect or report without fresh authorization.
+
+`createRevisionEvidenceStore({directory,uid,source,authorityId,issuerArtifactDigest,
+workerArtifactDigest,clockId})` privately returns `reserveAttempt(binding)`,
+`publish(handle,bundle)`, synchronous `resolveCompletion(ref)`. Preexisting root,
+`claims` and `objects` require0700; files require0600/same UID/one link. Canonical
+paths/ancestry, no-follow opens, inode/size/time stability and bounded fatal UTF-8
+canonical JSON readback are checked. No request surface exposes publication or
+arbitrary authority JSON ingestion. No raw event/locator recovery or enumeration API.
+
+Claims `<intentDigest>.json` contain only version/runId/intentDigest/requestHash/
+descriptorDigest/deadline/issuerArtifactDigest. Private handle identity is required to
+publish; copy/forgery fails. Objects `<proofDigest>.json` contain exact
+`{version:1,proof,result,boundary}` bundles (32768 maximum; proof8192/result4096/
+boundary8192). Ref and digest both equal canonical protocol digest(proof), not the
+bundle byte hash. Duplicate/trailing/noncanonical JSON and inconsistent hashes deny.
+Cooperating owner immutability uses a durable exclusive evidence.lock, exclusive temp,
+write+file fsync+rename+parent/root fsync+full readback, then unlock+root sync. Existing
+objects are never overwritten; identical trusted publication must match the original
+claim and bytes. Stale locks/unresolved temp deny independent resolution, including
+renamed but unconfirmed publication. Errors retain conservative artifacts; an unlock
+parent-sync failure may occur after durable publication and lock removal, so explicit
+historical resolution can still confirm those bytes. No automatic repair is supplied.
+This is not a hostile same-UID no-replace CAS or global exactly-once guarantee.
+
+At most128 claims,128 objects and4MiB object bytes are retained per namespace; a full
+store denies, never evicts. Retain claims/bundles/results/boundaries while execution,
+reporting or replay obligations remain. There is no GC, store reset or namespace
+switch procedure. Missing/corrupt/unavailable retained proof can conservatively hold
+future reservation release again; it cannot revoke a newly admitted intent.
+
+Focused tests cover actual child correlation and explicit record/release, v1/v2
+confusion, match/mismatch, current-policy changes/deadlines, unproven descendants/
+escape/reap, clock/attribution failure, timeout/no late publication, bundle custody/
+restart/corruption/capacity, claim no-reexecution and lock serialization. Persistence
+faults include ENOSPC/EIO/fsync/rename/readback/unlock and SIGKILL claim/publication
+split points. Pinned integration exercises actual writer/A1/A2/journal composition.
+Exact committed/published-head full Node and unchanged pinned Gateway check/test/build
+with zero integration skips are reported separately from ordinary integration skips.
+
+Future host acceptance still needs actual cgroup boundary/containment/reap/empty
+proof, pinned runtime/dependency inventory, real paths/providers/clock and protected
+mount/quota/durability/retention evidence. No production backend, native reporting,
+Docker/Compose/root-host acceptance or operational activation is claimed. Same-UID
+admin tampering, hidden ABA, host rollback, uninterruptible I/O and clock/callback
+stalls remain. Rollback disables the supervised opt-in/caller, preserving all claims,
+bundles and journal receipts. Old code rejects v2 and may conservatively re-hold
+reporting-incomplete entries. Disabling cannot undo already-admitted execution;
+no cleanup/reset/reissue or live rollback is supplied.
