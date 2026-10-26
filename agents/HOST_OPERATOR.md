@@ -960,3 +960,96 @@ Gateway/dependencies are changed. Source rollback removes the additive inspector
 bridge/new tests and integration/doc additions only; preserve real schema/state/
 intents/receipts/source mappings. Future callers fail closed rather than trust
 serialized intent JSON, reset a journal, switch namespace or clear stale locks.
+
+## A13: one-shot new-event revision invocation — live NOT_READY
+
+`host-operator-auth/local-invocation.mjs` exports
+`createLocalRevisionInvocation(options) -> frozen {invoke(raw)}`. This is a local
+library composition of actual A10 admission and actual A12 pending observation.
+There is no installed command, listener, transport, service, dispatcher, executor,
+registry, native publisher or receipt endpoint.
+
+Options are exactly A12's trusted fields: eventDirectory, journalDirectory,
+sourceDirectory, uid, ownerPubkey, requesterId, mentionPubkey, targetPubkey,
+channelId, threadId, source, currentJob, verifyReceipt, optional clock/monotonic.
+Own ordinary configuration and source are snapshotted; proxies, getters, symbols,
+unknown fields and injected ingress/observer/journal/context are refused. The
+required currentJob and verifyReceipt host seams remain unchanged. Actual A12 is
+constructed **before** actual A10, validating protected disjoint/nonnested source,
+event and journal namespaces before any admission. Construction creates no event,
+intent or HEAD observation. No environment/argv/default policy discovery occurs.
+The two components share one selected nondecreasing wall clock; existing component
+read budgets remain independent, with no aggregate hard timeout.
+
+`invoke` accepts exactly one raw string or ordinary non-shared Buffer, detached
+once before any trusted callback, 1..16384 bytes. Both stages receive that same
+private snapshot (their existing internal defensive copies remain). No caller
+intent, parsed request, verified context, path or resume option exists. Input
+brand/size/Unicode/BOM or constructor failures throw fixed
+`local_invocation_denied` code/message/stack. Malformed signed content is rejected
+by actual A10/A1, without duplicating the signed-event parser or authority engine.
+
+Actual ingress is called once. Only this call's newly returned `intent`, step
+`execution`, with exact registered `status.revision`/`read_only`/no-user-action
+source descriptor, digest and timing shape can advance. Expected intentId/digest
+come exclusively from that return. These DATA checks confer no authority: actual
+A12 independently rechecks event, current policy and real pending state before and
+after actual A11's source read. The bridge is called once, with no outer journal
+lock; existing A10 and two A12 inspection locks retain separate lifetimes.
+
+Bounded (<=8192 bytes), recursively frozen results contain only allowlisted fields:
+
+- `{status:'observed'|'mismatch', admittedIntent:{intentId,intentDigest},
+  observation:<actual normalized A12 bridge result>}`.
+- `{status:'not_observed', stage:'admission', code:<fixed code>}` for every other
+  ingress result. Known codes include ingress_denied, placement_unconfirmed,
+  placement_conflict, placement_denied, admission_denied, request_conflict,
+  workspace_busy, journal_locked, journal_full, host_preparation_required,
+  outcome_unknown, complete and nonexecution_intent. Unexpected/malformed or
+  uncertain journal results use admission_unconfirmed. No underlying error or
+  public execution receipt is projected.
+- `{status:'not_observed', stage:'observation',
+  code:'revision_observation_denied', admittedIntent:{intentId,intentDigest}}` after
+  a positively returned execution intent, including bridge/result validation faults.
+
+**Partial progress is durable.** `not_observed` never means that no event or intent
+was persisted. Observation failure never rolls back/unlinks admission, resets the
+journal, switches namespace, calls next again, records a receipt or retries. A
+second invocation of already placed raw input stops at placement_unconfirmed,
+including after restart/crash. It never adopts a pending event or resumes A12.
+Existing unknown/blocked/complete/report/nonexecution outcomes stop before source
+observation. The separate explicit A12 API retains its documented authorized,
+non-consuming behavior; this coordinator adds no resume entry point.
+
+An admittedIntent only identifies an earlier returned intent. It does not assert
+that the intent remains pending at response time. Legitimate concurrent receipt
+recording can suppress observation or finish independently after the final check;
+the coordinator never undoes it. No observation constitutes execution success,
+completion, receipt, PASS or READY. The actual HEAD pointer may refer to a missing
+object; object/tree/dirty/origin/install/sourceDigest integrity is not proven.
+Mismatch grants no permission to checkout or repair anything.
+
+A local in-flight guard rejects same-instance callback reentrancy, throws the fixed
+input error and clears in finally. This is no cross-process claim, scheduling,
+queue, retry or exactly-once guarantee. Separate journal lock/temp failures remain
+conservative, including stale locks after death, with no cleanup/adoption. Existing
+same-UID trust, final-check/ABA/later mutation, synchronous syscall stalls and A11
+observed100ms/component budgets remain limitations; neither source nor policy is
+transactionally frozen across the two released locks. Actual host installation,
+caller/input custody, policy wiring, namespaces, UID and storage still require
+owner acceptance. H1–H9 live remain NOT_READY; #21 isolation and #11 Ready workflow
+remain separate.
+
+Tests use the actual chain and protected ordinary-UID disposable fixtures, with
+standalone DTO policy/receipt authorities explicitly marked. Pinned integration
+uses actual Gateway provider and writer. Coverage includes one next/one HEAD read,
+no held journal lock over HEAD, state bytes/mtime/effect/receipt preservation,
+mismatch, no-resume/busy workspace, raw/config mutation, reentrancy, revoked policy,
+expiry, event/receipt changes between stages/during source read, storage/clock and
+ENOSPC faults, malformed result projection, and SIGKILL after placement/admission/
+inspection/HEAD. Instrumentation wraps real methods for fault injection, never
+replaces authority with canned observation success. Full Node and unchanged pinned
+harness counts are reported per exact head, with ordinary integration skips separate.
+Source rollback removes only this API/new tests and integration/doc additions;
+preserve already created events, journal state, intents and receipts. No schema
+migration or operational rollback is supplied.
