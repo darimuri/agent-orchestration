@@ -98,13 +98,28 @@ function inspectionData(value) {
 }
 
 export class HostOperatorJournal {
-  #directory; #source; #owner; #authorize; #verifyReceipt; #clock;
-  constructor({ directory, source, ownerPubkey, authorize: authorizationAdapter, verifyReceipt, clock = Date.now }) {
-    if (typeof authorizationAdapter !== 'function' || typeof verifyReceipt !== 'function' || typeof clock !== 'function') deny('adapter_required');
+  #directory; #source; #owner; #authorize; #verifyReceipt; #verifyRevisionCompletion; #clock;
+  constructor({ directory, source, ownerPubkey, authorize: authorizationAdapter, verifyReceipt, verifyRevisionCompletion, clock = Date.now }) {
+    if (typeof authorizationAdapter !== 'function' || typeof verifyReceipt !== 'function' || typeof clock !== 'function' || (verifyRevisionCompletion !== undefined && typeof verifyRevisionCompletion !== 'function')) deny('adapter_required');
     if (typeof directory !== 'string' || !path.isAbsolute(directory) || directory === '/' || path.normalize(directory) !== directory) deny('journal_untrusted');
     hexadecimal(ownerPubkey);
     this.#directory = directory; this.#source = binding(source); this.#owner = ownerPubkey;
-    this.#authorize = authorizationAdapter; this.#verifyReceipt = verifyReceipt; this.#clock = clock;
+    this.#authorize = authorizationAdapter; this.#verifyReceipt = verifyReceipt; this.#verifyRevisionCompletion = verifyRevisionCompletion; this.#clock = clock;
+  }
+  // Only competing NEW admissions use this predicate; reporting/replay stay unchanged.
+  #reserved(e) {
+    if (complete(e)) return false;
+    if (!this.#verifyRevisionCompletion || e.descriptor.operationId !== 'status.revision' ||
+        e.descriptor.privilege !== 'read_only' || e.descriptor.userActionId !== null) return true;
+    const executions = e.effects.filter(x => x.intent.step === 'execution');
+    if (executions.length !== 1 || !['success', 'failed'].includes(executions[0].receipt?.outcome)) return true;
+    const effect = executions[0];
+    try {
+      const proof = { ref: effect.receipt.evidenceRef, digest: effect.receipt.evidenceDigest };
+      const normalized = receipt(this.#verifyRevisionCompletion(proof, copy(effect.intent),
+        { request: copy(e.request), identity: copy(e.identity) }), effect.intent, this.#now());
+      return digest(normalized) !== digest(effect.receipt);
+    } catch { return true; } // Unavailable/revoked/conflicting proof HOLDs reservation.
   }
   #now() {
     try { const now = this.#clock(); timestamp(now); return now; } catch { deny('clock_invalid'); }
@@ -170,8 +185,7 @@ export class HostOperatorJournal {
         return { status: 'outcome_unknown', code: now >= pending.deadline ? 'deadline_elapsed' : 'pending_effect', intentId: pending.intentId };
       }
       if (!e) {
-        if (Object.values(state.entries).some(other => !complete(other) &&
-            (other.request.jobId === r.jobId || other.descriptor.workspaceId === d.workspaceId))) deny('workspace_busy');
+        if (Object.values(state.entries).some(other => (other.request.jobId === r.jobId || other.descriptor.workspaceId === d.workspaceId) && this.#reserved(other))) deny('workspace_busy');
         if (Object.keys(state.entries).length >= 128) deny('journal_full');
         e = { request: r, requestHash: digest(r), descriptor: d, identity: who, effects: [] };
         state.entries[key] = e;

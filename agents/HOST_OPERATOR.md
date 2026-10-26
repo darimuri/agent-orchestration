@@ -1144,3 +1144,128 @@ activation exists; #21 isolation and #11 Ready workflow remain separate. Source
 rollback removes this additive method/tests/docs while preserving invoke and all
 already-created events/intents/receipts/state. Callers must fail closed when resume
 is absent; never fall back to re-admission, another namespace or automatic repair.
+
+## A15: restricted completion verification and opt-in reservation release — live NOT_READY
+
+`host-operator-auth/revision-completion.mjs` exports
+`createRevisionCompletionVerifier({source,authorityId,resolveCompletion,clock?})`.
+The returned synchronous `verify(evidence,intent,{request,identity})` fits the
+existing trusted verifyReceipt contract. Source, opaque authorityId and resolver
+are fixed trusted constructor inputs. There is no default issuer, file/store,
+provider, environment/module loader, executor or bootstrap. This module verifies
+independently supplied terminal evidence; it does not produce that evidence.
+
+Caller evidence is only exact own bounded `{ref,digest}` (identifier and 64 lowercase
+hex). The verifier hardens and detaches caller evidence, intent and context before
+JSON helpers or trusted callbacks. It rejects proxies/getters/symbols/extra fields,
+exotic data, Promises and oversized input. `resolveCompletion(ref)` must independently
+resolve retained historical positive evidence, not echo caller JSON or derive
+termination from observation, a signed request, current policy, locator, receipt
+outcome, timeout, cancellation or elapsed deadline. The trusted resolver must have
+its own bounded execution/evidence provenance. Synthetic proof maps in tests are
+explicit independent fixture authorities, not deployed issuers or termination proof.
+
+The exact <=8192-byte attestation v1 shape is:
+`{version:1,type:'host-operator.revision-completion',authorityId,completionId,
+requestHash,intentId,intentDigest,descriptorDigest,startedAt,finishedAt,outcome,
+execution,resultDigest,summary}`.
+Execution is exactly `{kind:'in_process_read_only',settled:true,descendants:0}`.
+Only success/failed outcomes for the registered status.revision/read_only/no-user-
+action execution are accepted. Request/context/authorization event, descriptor/
+source/workspace/base/sourceDigest/registry and exact execution intent are correlated.
+Intent sequence is zero and its original registered5000ms deadline must match.
+Caller digest must equal the existing canonical digest of the detached attestation.
+
+`startedAt >= intent.createdAt`, `finishedAt >= startedAt` and `finishedAt <=` trusted
+current time. Success must positively attest a finish **before** the original
+deadline, even if recorded historically after expiry. A positively proven settled
+failed attempt may finish after that deadline. Expiry never supplies finish evidence
+or permits new work. Nondecreasing trusted clock checks surround resolution.
+For this non-test in-process operation summary must be exactly
+`{passed:0,failed:0,skipped:0,exitCode:null,signal:null}`; no invented test counts,
+child exit code or signal is accepted. A pointer mismatch does not by itself decide
+completion outcome. `resultDigest` identifies a retained actual bounded run result;
+it is not standalone proof of its contents or installed integrity.
+
+The normalized existing-schema receipt uses receiptId=completionId, exact intent/
+request digests, step=execution, attested outcome/finishedAt, evidenceRef=ref and
+evidenceDigest=digest(attestation), with that zero/null summary. Existing receipt
+validation also runs. The receipt remains detached. Verifier constructor/call errors
+have fixed `revision_completion_denied` code/message/stack, without underlying
+proof, callback error, canary or private path. Normal journal record errors retain
+their existing receipt-invalid/conflict/storage boundaries.
+
+`HostOperatorJournal` adds an OPTIONAL trusted constructor hook
+`verifyRevisionCompletion`. Missing preserves the old reservation behavior exactly;
+non-functions are refused. For restricted wiring, an owner-selected verifyReceipt
+dispatcher routes status.revision execution to the actual new verifier and report/
+user receipts to separate independent authorities (or denies them). Configure the
+same restricted verifier as verifyRevisionCompletion. No always-positive adapter,
+caller callback or raw observation is a completion authority.
+
+`record` remains the sole receipt persistence/reconciliation API, with unchanged
+schema, return shape and historical semantics. It resolves the independent evidence,
+validates and durably persists the normalized execution receipt first. Same-proof
+reconciliation on the current effect is idempotent; conflicting normalized receipts
+deny. Timeout/cancelled still return termination_unproven and never persist a receipt.
+No native publisher or receipt producer is introduced, and execution record returns
+recorded, not lifecycle complete.
+
+Only competing **new entry** admission uses the new reservation predicate. Completed
+lifecycles release as before. Every other entry holds by default. An opt-in candidate
+must be status.revision/read_only/no user action, contain exactly one execution
+effect and have a persisted success/failed execution receipt. Under the existing
+journal lock the predicate reconstructs `{ref:receipt.evidenceRef,
+digest:receipt.evidenceDigest}`, re-verifies against the actual stored execution
+intent/request/identity, runs existing receipt validation and requires exact digest
+equality with the persisted normalized receipt. Only that matching independently
+resolved proof permits ignoring this entry for execution job/workspace reservation.
+
+Missing/revoked/unavailable/invalid/conflicting proof, generic stored success without
+independently resolving restricted authority, pending/needs_user/timeout/cancelled,
+report-only or other operations continue to hold. No persisted release flag or
+migration is added. Same request replay never re-executes: its next step remains
+Kaneo then Buzz with fresh authorization and separate genuine native receipts.
+Old task/thread/mention/result/report payloads stay bound to the original request,
+even if a second authorized execution is pending. Report obligations, replay history,
+128-entry/1MiB bounds and archival needs remain. Reports are not silently delivered,
+deleted or bypassed, and execution proof cannot verify a report step.
+
+Record proof resolution/persistence and new admission proof revalidation use the
+existing global lock. New admission either sees a pending effect and blocks, or a
+persisted matching receipt and may proceed. No new outer lock, HEAD observation,
+process, automatic retry or recovery discovery occurs. Stale lock/temp artifacts
+remain refused. Restart requires the same namespace/source and retained independent
+proof; if authority disappears, future admission may conservatively hold again. It
+does not revoke an already-issued new intent or reset old entries. A persistence
+error is not a release acknowledgement: actual durable state plus revalidated proof
+control a later admission. Lost-response reconciliation remains explicit record.
+
+The trusted producer must positively establish that the bounded synchronous attempt
+has settled with zero descendants capable of workspace mutation. This PR supplies
+no actual producer/OS quiescence mechanism. Callback stalls are not preemptible, and
+shared-UID/final-check/ABA/source-policy/host rollback limits remain. Historical proof
+does not replace current authorization for a new execution or report; original
+invoke/resume/non-consuming behavior and execution5000ms deadline are unchanged.
+
+Tests cover actual receipt persistence and restricted revalidation before a second
+execution, opt-in versus unchanged default behavior, report ordering while newer
+execution remains pending, duplicate/conflicting/unavailable proofs, original/late
+failure timing and historical auth expiry, issuer/request/descriptor/effect/result
+bindings, input/proof hardening, zero-descendant/settled semantics, generic receipt
+refusal, lock serialization, persistence faults and SIGKILL before/after temp/rename/
+directory sync. Pinned integration uses actual signed ingress/current Gateway policy
+and writer, while terminal/native receipt authorities remain explicitly synthetic.
+Existing invoke/resume/receipt/journal tests stay regression coverage. Exact-head
+full suite/pinned harness counts are reported with ordinary skips separately.
+
+All H1–H9 live remain NOT_READY, especially actual H8 producer/termination/native
+report evidence. No install/bootstrap/CLI/service/executor/issuer implementation,
+raw/locator/result recovery store, schema migration, dependency/Gateway/runtime/
+credential/live path or operational activation changes. Before real wiring the
+owner must accept producer identity/provenance/retention/storage/termination and
+installed host facts; no deployed values are invented here. Rollback disables/removes
+this opt-in hook and reverts source/tests/docs; unchanged stored receipts/schema stay
+readable and incomplete lifecycles conservatively hold as before. Preserve all
+already-admitted work/state/receipts; disabling cannot undo a previously issued new
+execution. No namespace reset or operational rollback is supplied.
