@@ -402,3 +402,14 @@ test('invalid clock/config errors use fixed codes and never echo host values', t
   }
   assert.deepEqual(fs.readdirSync(f.directory), []);
 });
+
+test('A15 optional release hook is never enabled by missing/invalid configuration and generic execution receipt still holds reports',t=>{
+  const f=fixture(t);for(const value of [null,true,{},Promise.resolve(true)])rejects(()=>new HostOperatorJournal({...f.options,verifyRevisionCompletion:value}),'adapter_required');const p=f.make().next(f.r);f.make().record(f.r,f.evidence(p));rejects(()=>f.make().next({...f.r,requestId:'second'}),'workspace_busy');const old=f.make().next(f.r);assert.equal(old.intent.step,'kaneo');rejects(()=>f.make().next({...f.r,requestId:'second'}),'workspace_busy');
+});
+test('A15 arbitrary truthy/malformed hook or wrong normalized receipt cannot release persisted generic success',t=>{
+  const f=fixture(t),p=f.make().next(f.r),e=f.evidence(p);f.make().record(f.r,e);const before=disk(f);for(const hook of [()=>true,()=>Promise.resolve(true),()=>({verified:true}),()=>{throw Error('SECRET_CANARY');},()=>({...f.authoritative.get(e.ref),receiptId:'different'})]){const j=new HostOperatorJournal({...f.options,verifyRevisionCompletion:hook});rejects(()=>j.next({...f.r,requestId:'second'}),'workspace_busy');assert.equal(disk(f),before);}
+});
+test('A15 nonrevision operations and needs_user outcomes retain existing reservation semantics without completion-hook calls',t=>{
+  const f=fixture(t,'validate.node'),p=f.make().next(f.r);f.make().record(f.r,f.evidence(p));let calls=0;rejects(()=>new HostOperatorJournal({...f.options,verifyRevisionCompletion:()=>{calls++;throw Error('SECRET_CANARY');}}).next({...f.r,requestId:'second'}),'workspace_busy');assert.equal(calls,0);
+  const g=fixture(t),q=g.make().next(g.r);g.make().record(g.r,g.evidence(q,'needs_user'));rejects(()=>new HostOperatorJournal({...g.options,verifyRevisionCompletion:()=>{calls++;throw Error('SECRET_CANARY');}}).next({...g.r,requestId:'second'}),'workspace_busy');assert.equal(calls,0);
+});

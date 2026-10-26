@@ -7,6 +7,7 @@ import { pathToFileURL } from 'node:url';
 import { createHash } from 'node:crypto';
 import test from 'node:test';
 import { schnorr } from '../host-operator-auth/node_modules/@noble/curves/secp256k1.js';
+import { createRevisionCompletionVerifier } from '../host-operator-auth/revision-completion.mjs';
 import { createLocalRevisionInvocation } from '../host-operator-auth/local-invocation.mjs';
 import { createRevisionObservationBridge } from '../host-operator-auth/revision-observation.mjs';
 import { createLocalEventIngress } from '../host-operator-auth/local-ingress.mjs';
@@ -113,6 +114,25 @@ function fixture(t, { grant = true, preplace = true } = {}) {
       ...owner, channelId, threadId, source, currentJob: (...args) => current(...args), clock: () => clock, monotonic: () => 0,
       verifyReceipt: evidence => { if (!receipts.has(evidence.ref)) throw Error(canary + directory); return receipts.get(evidence.ref); } });
   };
+  const completion = () => {
+    // Independent synthetic completion authority; NOT a deployed execution issuer.
+    const proofs = new Map(); let available = true;
+    const verify = createRevisionCompletionVerifier({ source, authorityId: 'fixture-terminal-authority', clock: () => clock,
+      resolveCompletion: ref => { if (!available || !proofs.has(ref)) throw Error(canary + directory); return proofs.get(ref); } });
+    const proof = (plan, changes = {}) => {
+      const p = { version: 1, type: 'host-operator.revision-completion', authorityId: 'fixture-terminal-authority', completionId: 'terminal-proof',
+        requestHash: plan.intent.requestHash, intentId: plan.intent.intentId, intentDigest: digest(plan.intent), descriptorDigest: plan.intent.descriptorDigest,
+        startedAt: plan.intent.createdAt, finishedAt: clock, outcome: 'success', execution: { kind: 'in_process_read_only', settled: true, descendants: 0 },
+        resultDigest: 'f'.repeat(64), summary: { passed: 0, failed: 0, skipped: 0, exitCode: null, signal: null }, ...changes };
+      proofs.set('completion-proof', p); return { ref: 'completion-proof', digest: digest(p) };
+    };
+    const make = () => new HostOperatorJournal({ directory: journalDir, source, ownerPubkey, authorize: adapter, clock: () => clock,
+      verifyRevisionCompletion: verify, verifyReceipt: (e, i, c) => {
+        if (i.step === 'execution') return verify(e, i, c);
+        if (!receipts.has(e.ref)) throw Error(canary); return receipts.get(e.ref);
+      } });
+    return { proof, make, proofs, available: value => { available = value; } };
+  };
   function evidence(plan, outcome = 'success') {
     const ref = 'proof-' + receipts.size;
     receipts.set(ref, { version: 1, receiptId: ref, intentId: plan.intent.intentId, intentDigest: digest(plan.intent),
@@ -121,7 +141,7 @@ function fixture(t, { grant = true, preplace = true } = {}) {
     return { ref };
   }
   const disk = () => fs.existsSync(path.join(journalDir, 'state.json')) ? fs.readFileSync(path.join(journalDir, 'state.json'), 'utf8') : '';
-  return { r, directory, journalDir, agentsFile, jobsFile, eventDir, eventFile, hostileEvent, placer, placement, write, writer, command, admin, privateDigests, journal, ingress, bridge, invocation, sourceDir, evidence, receipts, disk, adapter, adapterOptions, provider,
+  return { r, directory, journalDir, agentsFile, jobsFile, eventDir, eventFile, hostileEvent, placer, placement, write, writer, command, admin, privateDigests, journal, ingress, bridge, invocation, sourceDir, completion, evidence, receipts, disk, adapter, adapterOptions, provider,
     time: value => { clock = value; }, event: value => { event = value; hostileEvent(value, r.authorizationEventId); if (value.id !== r.authorizationEventId) hostileEvent(value); },
     eventHook: fn => { eventHook = fn; },
     hook: fn => { hook = fn; }, monotonic: fn => { monotonic = fn; }, current: fn => { current = fn; } };
@@ -497,4 +517,19 @@ for(const at of [1,2,3,4])integration(`A14 actual writer removal at resume polic
 });
 for(const point of ['receipt','event'])integration(`A14 actual ${point} change during resumed source read suppresses output`,t=>{
   const f=fixture(t,{preplace:false}),api=f.invocation(),raw=JSON.stringify(signed()),first=api.invoke(raw),original=fs.readSync;let changed=false;fs.readSync=(fd,...args)=>{const n=original(fd,...args);if(fs.fstatSync(fd).size===41&&!changed){changed=true;if(point==='event')fs.unlinkSync(f.eventFile(f.r.authorizationEventId));else{const intent=Object.values(JSON.parse(f.disk()).entries)[0].effects[0].intent;assert.equal(f.journal().record(f.r,f.evidence({intent})).status,'recorded');}}return n;};let result;try{result=api.resume(raw,first.admittedIntent);}finally{fs.readSync=original;}assert(changed);assert.deepEqual(result,{status:'not_observed',stage:'resume',code:'revision_observation_denied'});const receipt=Object.values(JSON.parse(f.disk()).entries)[0].effects[0].receipt;assert.equal(receipt?.outcome??null,point==='receipt'?'success':null);noLeaks(f,result);
+});
+
+integration('A15 actual signed admission -> independent terminal proof -> durable receipt -> opt-in next execution while old reports remain',t=>{
+  const f=fixture(t,{preplace:false}),first=f.ingress().ingest(JSON.stringify(signed())),c=f.completion(),j=c.make(),secondEvent=signed({...baseRequest,requestId:'second'}),second={...baseRequest,requestId:'second',authorizationEventId:secondEvent.id};assert.equal(f.placer.place(JSON.stringify(secondEvent)).status,'confirmed');assert.throws(()=>j.next(second),e=>e.code==='workspace_busy');const proof=c.proof(first);assert.equal(j.record(f.r,proof).status,'recorded');const before=f.disk();assert.throws(()=>f.journal().next(second),e=>e.code==='workspace_busy');assert.equal(f.disk(),before);const next=c.make().next(second);assert.equal(next.intent.step,'execution');assert.equal(Object.values(JSON.parse(f.disk()).entries).find(e=>e.request.requestId===baseRequest.requestId).effects.length,1);
+  assert.deepEqual(f.invocation().resume(JSON.stringify(signed()),{intentId:first.intent.intentId,intentDigest:first.intentDigest}),{status:'not_observed',stage:'resume',code:'revision_observation_denied'});
+  const kaneo=j.next(f.r);assert.equal(kaneo.intent.step,'kaneo');assert.equal(kaneo.intent.payload.taskId,baseRequest.taskId);assert.throws(()=>j.record(f.r,proof),e=>e.code==='receipt_invalid');j.record(f.r,f.evidence(kaneo));const buzz=j.next(f.r);assert.equal(buzz.intent.step,'buzz');assert.equal(buzz.intent.payload.threadId,threadId);j.record(f.r,f.evidence(buzz));assert.equal(j.next(f.r).status,'complete');assert.equal(Object.values(JSON.parse(f.disk()).entries).find(e=>e.request.requestId==='second').effects[0].receipt,null);noLeaks(f,next);
+});
+integration('A15 actual Gateway revocation denies new effects while historical completion record remains possible',t=>{
+  const f=fixture(t,{preplace:false}),first=f.ingress().ingest(JSON.stringify(signed())),c=f.completion(),proof=c.proof(first),event=signed({...baseRequest,requestId:'second'});f.placer.place(JSON.stringify(event));assert.equal(f.admin('remove').status,'confirmed');f.time(now+7200001);assert.equal(c.make().record(f.r,proof).status,'recorded');assert.throws(()=>c.make().next({...baseRequest,requestId:'second',authorizationEventId:event.id}),e=>e.code==='authorization_denied');assert.equal(Object.values(JSON.parse(f.disk()).entries).length,1);
+});
+integration('A15 real late settled-failed completion reconciles without timely-success claim and proof disappearance holds reservation',t=>{
+  const f=fixture(t,{preplace:false}),first=f.ingress().ingest(JSON.stringify(signed())),c=f.completion();f.time(now+10000);const proof=c.proof(first,{outcome:'failed'});assert.equal(c.make().record(f.r,proof).status,'recorded');const event=signed({...baseRequest,requestId:'second'}),r={...baseRequest,requestId:'second',authorizationEventId:event.id};f.placer.place(JSON.stringify(event));c.available(false);assert.throws(()=>c.make().next(r),e=>e.code==='workspace_busy');c.available(true);assert.equal(c.make().next(r).intent.step,'execution');assert.equal(first.intent.deadline,now+5000);
+});
+integration('A15 observation/current-policy/locator/caller attestation cannot record or release actual pending execution',t=>{
+  const f=fixture(t,{preplace:false}),first=f.ingress().ingest(JSON.stringify(signed())),c=f.completion(),actual=f.bridge().observe(JSON.stringify(signed()),{intentId:first.intent.intentId,intentDigest:first.intentDigest}),before=f.disk();for(const e of [actual,{intentId:first.intent.intentId,intentDigest:first.intentDigest},{ref:'missing',digest:'f'.repeat(64)},state().jobs.jobs[0].hostAdmission])assert.throws(()=>c.make().record(f.r,e),x=>x.code==='receipt_invalid');assert.equal(f.disk(),before);const proof=c.proof(first,{execution:{kind:'in_process_read_only',settled:false,descendants:0}});assert.throws(()=>c.make().record(f.r,proof),x=>x.code==='receipt_invalid');assert.equal(f.disk(),before);
 });
