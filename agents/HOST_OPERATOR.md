@@ -1053,3 +1053,94 @@ harness counts are reported per exact head, with ordinary integration skips sepa
 Source rollback removes only this API/new tests and integration/doc additions;
 preserve already created events, journal state, intents and receipts. No schema
 migration or operational rollback is supplied.
+
+## A14: explicit non-consuming observation resume — live NOT_READY
+
+The same trusted `createLocalRevisionInvocation(options)` factory now returns
+frozen `{invoke(raw), resume(raw, locator)}`. `invoke` retains the A13 new-event-only
+path and result semantics: existing placement never automatically resumes. The
+additional method is one explicitly requested read-only attempt, not a recovery
+worker, admission fallback, discovery API, result store, capability token or CLI.
+Constructor options and actual bridge-first source preflight remain unchanged.
+
+`resume` accepts exactly two arguments. Raw uses the same strict detached
+1..16384-byte string/ordinary non-shared Buffer boundary. Locator is exactly own
+bounded primitive `{intentId,intentDigest}` using existing identifier/hex rules.
+Both are snapshotted **before any trusted clock/provider callback**. Whole A13
+results, receipts, observations, policy DTOs and parsed verified contexts are not
+locators; proxies/getters/symbols/exotic inherited data/extra fields/Promise and
+oversized data are refused without evaluating getters or unsafe JSON first.
+Input/arity/reentrancy errors throw fixed `local_invocation_denied`
+code/message/stack, preserving the existing input failure boundary.
+
+Locator is untrusted lookup data, not authority or proof of admission. Actual
+`verifyOwnerEvent` derives the request under fixed owner/target/channel/thread/
+source and the selected current clock; its normalized request hash correlates the
+output. This signature check does not grant pending execution authority. The
+already constructed actual A12 bridge observes once with that same raw snapshot
+and locator, re-verifying signed event, current policy and actual existing pending
+state before/after A11's source read. The existing observation projection retains
+invoke's ID/digest/request/descriptor/source correlation checks unchanged.
+
+Success uses the existing recursively frozen <=8192-byte observed/mismatch envelope
+with admittedIntent and normalized actual A12 observation. It identifies previously
+admitted work, not new admission or a guarantee of current pending state at response
+time. A valid-shaped input that fails signature, policy, pending, observation or
+projection checks returns ONLY
+`{status:'not_observed',stage:'resume',code:'revision_observation_denied'}`.
+There is no locator/admittedIntent echo on failed resume because this call did not
+establish an earlier admission, and no complete/report/receipt payload or underlying
+error is returned. Concurrent legitimate changes are not asserted absent.
+
+Resume calls no ingress, placer, next, record, persistence callback or receipt
+verifier. Actual A12 still requires the existing trusted verifyReceipt dependency;
+no fabricated positive authority replaces it. No event, intent, sequence, effect,
+reservation, timestamp renewal, schema or state format is created. Existing
+state.json bytes/mtime stay unchanged unless another legitimate writer changes it.
+A12's two transient inspection locks remain separate, with no outer lock or lock
+held across HEAD. Non-consuming is not filesystem-side-effect-free; death may leave
+a stale lock. No stale lock/temp deletion, cleanup, reset or namespace switch occurs.
+
+The original status.revision execution deadline remains **5000ms from its original
+creation**. Resume must pass A12's initial and final pending/deadline checks before
+that same deadline. A fresh factory/restart never renews it. This API cannot rescue
+expired work or stale locks. If the locator was lost, it does not discover one by
+job/event or read raw journal state to mint another; separately authorized
+investigation is required. A placement-only crash without pending work cannot
+resume. Retained raw/locator and same trusted namespace/current policy can be
+explicitly submitted after restart only while the original pending remains valid.
+
+Both methods share the same local in-flight guard and finally release. Cross-method
+or same-method reentry fails before a second side effect. No queue/timer/automatic
+retry/scheduling, cross-process claim or exactly-once guarantee is introduced.
+Repeated explicit valid resumes may reread HEAD, without consuming execution or
+creating completion evidence. Result output cannot satisfy independent real record
+receipt authority. Genuine concurrent receipt recording is never rolled back.
+
+Missing/forged/consumed/report/user/complete/expired state, revoked policy, missing
+or substituted event, unsafe source, corrupt state, temp/lock or I/O faults fail
+closed. A legitimate receipt, revoke, event change or deadline crossing during
+source read can suppress the final output. Before/after checks remain nontransactional;
+final-read/ABA/later changes, accepted same-UID shared-admin trust, host rollback and
+non-preemptible synchronous syscall limits remain. Component observed100ms budgets
+are not hard aggregate timeouts. HEAD pointer remains pointer-only, not proof of
+object existence/tree/dirty/origin/install/sourceDigest integrity or authority to
+repair/check out a mismatch.
+
+Tests exercise actual partial A13 admission -> explicit resume, unchanged state and
+original deadline, repeated/new-factory reads, no admission/record/receipt verifier,
+two locks/one HEAD/no held source lock, verifier correlation and immutable results.
+Standalone DTO/receipt policy is explicitly fixture-only; pinned integration uses
+actual Gateway provider/writer. Negative coverage includes caller data mutation in
+clock/provider callbacks, context/locator/authority substitution, current revoke,
+receipt/event races, expiry/restart, corrupt/temp/stale storage, ENOSPC/open/sync/
+unlink/clock faults and SIGKILL during inspection/after HEAD. Existing invoke
+regressions stay intact. No test result is live acceptance.
+
+All H1–H9 live remain NOT_READY. Actual installed provenance/UID/namespaces/storage/
+current policy and signed raw/locator custody still need owner acceptance. No new
+bootstrap/transport/service/executor/Gateway/dependency/live path or operational
+activation exists; #21 isolation and #11 Ready workflow remain separate. Source
+rollback removes this additive method/tests/docs while preserving invoke and all
+already-created events/intents/receipts/state. Callers must fail closed when resume
+is absent; never fall back to re-admission, another namespace or automatic repair.
