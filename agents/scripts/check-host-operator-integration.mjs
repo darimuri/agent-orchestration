@@ -74,13 +74,15 @@ try {
   fs.writeFileSync(globalConfig, '', { mode: 0o600 }); env.npm_config_globalconfig = globalConfig;
   const app = path.join(scratch, 'orchestration'), gateway = path.join(scratch, 'gateway');
   stage = 'archive'; archive(orchestration, expected, app); archive(dependency, gatewayHead, gateway);
+  const nativeBuild = path.join(scratch, 'native-build'); fs.mkdirSync(nativeBuild, { mode: 0o700 });
+  check('native-build', process.execPath, [path.join(app, 'agents/scripts/build-host-operator-supervisor.mjs'), nativeBuild], app);
   const install = ['ci', '--ignore-scripts', '--offline', '--no-audit', '--no-fund'];
   check('gateway-install', 'npm', install, gateway);
   for (const script of ['check', 'test', 'build']) check('gateway-' + script, 'npm', ['run', script], gateway);
   check('auth-install', 'npm', install, path.join(app, 'agents/host-operator-auth'));
   // Existing state-storage fixtures intentionally reject /workspace roots; keep
   // data in private /tmp children, and executable AGE #5 fixtures in scratch.
-  const testEnv = { HOST_OPERATOR_TEST_GATEWAY_BUILD: gateway, TMPDIR: os.tmpdir() };
+  const testEnv = { HOST_OPERATOR_TEST_GATEWAY_BUILD: gateway, HOST_OPERATOR_TEST_SUPERVISOR_BUILD: nativeBuild, TMPDIR: os.tmpdir() };
   const scripts = path.join(app, 'agents/scripts'), docker = path.join(app, 'agents/docker');
   const tests = [docker, scripts].flatMap(dir => fs.readdirSync(dir).filter(f => f.endsWith('.test.mjs')).sort().map(f => path.join(dir, f)));
   check('integration-test', process.execPath, ['--test', path.join(scripts, 'host-operator-integration.test.mjs')], app, testEnv);

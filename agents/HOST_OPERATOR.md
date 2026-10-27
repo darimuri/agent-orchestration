@@ -1420,3 +1420,200 @@ stalls remain. Rollback disables the supervised opt-in/caller, preserving all cl
 bundles and journal receipts. Old code rejects v2 and may conservatively re-hold
 reporting-incomplete entries. Disabling cannot undo already-admitted execution;
 no cleanup/reset/reissue or live rollback is supplied.
+
+### A17 delegated native retainer source (not installed)
+
+A17 implements a fixed `createCgroupRevisionSupervisor(config)` port for the existing
+A16 issuer. It returns exactly frozen `{run}`. This is a source/fixture phase, with no
+bootstrap entry, service file, installation, activation, native reporter or live
+cgroup test. All live H1–H9 remain NOT_READY. The earlier transient-service experiment
+pruned both normal-exit and killed boundaries; absence is UNKNOWN_PRUNED, never empty.
+The retainer instead owns a request leaf until positive sampling and exact removal.
+
+The constructor's exact owner-private keys are `uid,unitName,invocationId,controlGroup,
+cgroupMount,controlDirectory,sourceDirectory,source,clockId,runtimePath,runtimeDigest,
+workerPath,workerDigest,helperPath,helperDigest,managerPath,managerDigest,
+managerEnvironment`. No request-selected configuration, loader, default manager,
+PATH/runtime fallback or injected production syscall backend exists. UID, effective
+UID, GID and effective GID must all be1000 on Linux; another UID fails construction.
+The fixed runtime is Node22.23.3 with SHA256
+`fde6a4bf8d0562f7751d1a2d6cb9b417c4cfe107bbcb0aa3e9a24e125e348f48`.
+Both process.execPath and /proc/self/exe must identify it. Exact installed paths stay
+in private configuration, not this repository. Default Node20.11.1 is rejected.
+
+Runtime/helper/worker hashes are read in bounded64KiB chunks from no-follow ordinary
+single-link opened files, with inode/size/mtime/ctime/owner/mode stability checks.
+They are rehashed at construction, prelaunch and READY before GO. Runtime max256MiB,
+helper16MiB, worker131072. Runtime/helper/worker require UID1000, no special bits or
+group/other write. The fixed pinned manager executable may be protected root-owned.
+Native checks security.capability on itself and opened runtime/worker before clone;
+no capabilities are granted or repaired. Service and process capability sets must be
+empty. Accepted same-UID import/artifact TOCTOU and administration risks remain.
+
+`controlDirectory/artifacts.json` is a preexisting private0600 owner-accepted artifact
+inventory, not a bootstrap/configuration loader. Its exact shape is
+`{version:1,issuerDigest,files:{relativeAuthPath:sha256,...}}`. It must cover the entire
+installed auth directory, including all installed dependency files, with no missing
+or surplus names, symlinks or writable components. The issuer entry must match
+issuerDigest. Bytes and complete closure are rechecked before GO; absent inventory
+denies. No inventory values are invented or committed. Owner host acceptance must
+validate this inventory and full native/runtime loader closure against the build
+manifest; source fixtures simulate inventory and do not establish an installed set.
+
+The only manager command is the pinned managerPath with `--user show
+host-operator.service --no-pager` and explicit property selectors. Its timeout is250ms
+and output limit8192. No shell, mutation, default environment or arbitrary property
+language is accepted. The owner supplies exactly manager environment
+`{XDG_RUNTIME_DIR,DBUS_SESSION_BUS_ADDRESS,LANG:'C.UTF-8',TZ:'UTC'}`. Unique exact
+properties must match the expected invocation, MainPID=process.pid and ControlGroup;
+actual /proc/self/cgroup must be that group plus /supervisor. Root dev:inode and cgroup2
+filesystem identity are retained and checked. Unexpected leftover run groups deny
+new launches; there is no adoption, discovery/recovery or cleanup API.
+
+The required dedicated user-manager service contract is documentation only:
+Type=exec; ExitType=main; Delegate=yes; DelegateSubgroup=supervisor;
+RemainAfterExit=no; Restart=no; KillMode=control-group; KillSignal=SIGTERM;
+FinalKillSignal=SIGKILL; SendSIGKILL=yes; TimeoutStopSec=2s; UMask=0077;
+NoNewPrivileges=yes; CapabilityBoundingSet=; AmbientCapabilities=.
+ExecStart must directly exec the owner-private pinned Node and future fixed trusted
+entry as MainPID; A17 supplies neither that entry nor an installable unit. No hooks,
+PIDFile, reload/background shell, automatic restart, socket activation or controller
+changes are supplied. Systemd owns outer service/supervisor placement. Only the fixed
+native helper writes request children below that explicit delegation. User-manager
+ownership is not authority to create arbitrary siblings outside this subtree.
+
+An unsafe helper loss, corrupt/partial terminal protocol, unconfirmed cleanup or
+unreaped helper permanently poisons the adapter and immediately exits the dedicated
+MainPID with code70. This deliberate service-fatal behavior relies on the fixed outer
+ExitType=main/KillMode=control-group contract to stop request descendants. There is no
+configurable fatal callback or unrelated PID signal. Actual group stop on MainPID/
+helper/manager loss remains a mandatory future host acceptance test; manager death,
+blocked kernel tasks or failed stop is UNKNOWN/manual investigation, not proof.
+Source tests exercise exit70 only in disposable VM subprocesses.
+
+`run(spec)` keeps the exact A16 spec and validates all fields, canonical input,
+source/run/request/intent/worker/clock binding, fixed worker entry, process.execPath,
+LANG/TZ environment, limits8192/4096/4096 and original deadline before spawning.
+Both inputs and configuration reject nonordinary objects/accessors/proxies/extra
+keys. No raw signed event, ledger, callback, proof, operation registry or locator is
+sent to native code. A16 remains the authority for actual authorization/currentJob/
+pending checks and final proof publication. Backend emits no receipt, journal or
+report, never releases reservation, and holds no evidence/journal lock.
+
+The helper argv is exactly its pinned path, no options. Private inherited FDs:
+0 request/lifeline,1 framed response,2 bounded sanitized diagnostics,
+3 opened delegated root,4 opened runtime,5 opened worker,6 fresh backend lock.
+Each call freshly opens controlDirectory/supervisor.lock (0600/nlink1/UID1000), passes
+a distinct open-file description and immediately closes its own copy after spawn.
+Native holds a nonblocking exclusive F_OFD_SETLK through removal/reply; lock files
+are never unlinked or stolen. This is live serialization, not an attempt/recovery
+store. A16's durable one-attempt claim remains the replay guard.
+
+Wire records use four-byte ASCII magic and uint32 BE payload length<=16384. Strings
+are uint16 BE length with bounded non-NUL UTF8. Integers use explicit BE encoding;
+C never parses JSON, native struct padding or a requested command language.
+Q17A carries in exact order runId,raw requestHash32/intentDigest32/workerDigest32,
+clockId,startedAt/deadline u64,settlementWaitMs u32,input<=8192,runtimePath/workerPath,
+then runtime and worker dev/ino/size u64. Paths repeat fixed owner-resolved identities
+for FD agreement; the caller cannot select them. Native validates the exact frame,
+current UID/context/FDs/OFD lock, original time and an exclusive run_<runId> leaf.
+Collisions, unsupported clone3, permission/domain/seccomp errors have no fallback.
+
+R17A READY carries runId,random boundaryId32 and root dev/ino; no worker has cloned.
+Node revalidates manager/invocation/process/root and all pins/closure before sending
+the single GO byte0x47. Setup/hash/handshake consume the original budget. Other bytes,
+EOF, repeated/trailing records or timeout cannot start another worker. Parent input
+EOF/death triggers native cancellation; helper PR_SET_PDEATHSIG is an extra wakeup.
+Production uses only clone3(CLONE_INTO_CGROUP|CLONE_PIDFD), exit_signal SIGCHLD, target
+open request FD, no namespace/thread/shared-files flags. There is no spawn-then-move
+or ordinary fork fallback. The child is placed before operation code, closes every
+management/lifeline/artifact/lock descriptor, executes opened runtime with
+execveat(AT_EMPTY_PATH) and fixed worker argv, and receives only stdin/stdout/stderr
+plus LANG/TZ. C never invokes shell/Git/network/manager.
+
+The retainer stays in the manager-provided supervisor leaf and holds request/events/
+kill/pidfd identities. It feeds bounded input and concurrently drains bounded output
+through nonblocking CLOEXEC pipes. Overflow cancels the group and remains UNKNOWN,
+never a truncated successful observation. It tracks wall and monotonic time, rejects
+backward/uncertain clocks, stops on the earliest original deadline/wait cutoff and
+writes exact child cgroup.kill only once. A separate maximum2000ms settling/removal
+window does not extend operation success or A16 publication authority.
+
+PR_SET_CHILD_SUBREAPER, pidfd+waitid/waitpid and adopted-child reaping establish leader
+status and no unreaped attributable children. Pipe EOF, leader exit, kill ack, empty
+cgroup.procs or missing path never establish settlement. The same still-existing
+parent/child/events dev:inode and named paths, no child groups, domain and empty leaf
+subtree_control, leader reaped and recursive events populated0 are required before
+terminal snapshot. noEscape/sealed are lifecycle assertions within accepted same-UID
+trust, not protection against adversarial admins. Then only the exact owned empty
+leaf is removed and ENOENT is confirmed from the retained parent. Missing/replaced/
+pruned/foreign boundary or unconfirmed cleanup is service-fatal/UNKNOWN. No stale-lock
+cleanup, controller enablement, retry, namespace switch or recovery discovery exists.
+
+T17A carries fixed status/reason/run/boundary/request/intent/worker/clock identities,
+started/exited/settled times, private root/child dev:ino, reap/noEscape/sealed/populated,
+actual exit code or supported TERM/KILL, cleanup confirmation and bounded stdout/
+stderr. Exit0 is allowed only with exact settled+removed frame; exit2 is safe UNKNOWN
+with confirmed containment/cleanup; exit70 is unsafe service-fatal. Node waits for
+actual helper close/reap and exact terminal shape/code before returning frozen
+`{status:'settled',boundary,stdout,stderr}` or `{status:'unknown'}`. Private dev:ino
+fields never change A16's exact boundary/proof schema. Unsupported signals and invalid
+UTF8 are never repaired into a fake outcome. A16 alone classifies actual SHA match/
+mismatch and final policy/deadline; late backend responses cannot publish proof after
+A16 returned UNKNOWN. Existing v1/v2 compatibility, journal/evidence/receipt/report/
+invoke/resume/deadline contracts remain unchanged.
+
+Build command is the selected compatible Node invoking
+`agents/scripts/build-host-operator-supervisor.mjs <existing-private-output-directory>`.
+It uses fixed /usr/bin/cc with no CC/CFLAGS/PATH override or package/network install.
+The shared compiler flags include fixed `-B/usr/bin/` for subordinate programs
+under the sanitized environment; the linker inventory uses the same selector and
+the manifest records the complete argv. Production and both native harness builds
+use these flags. No inherited PATH is supplied.
+Production flags: -std=c17 -D_GNU_SOURCE -O2 -Wall -Wextra -Werror -Wformat=2
+-Wconversion -Wshadow -fstack-protector-strong -D_FORTIFY_SOURCE=2 -fPIE -pie
+-Wl,-z,relro,-z,now,-z,noexecstack. Source-prefix mapping avoids embedded build roots.
+The generated revision-supervisor.build.json inventories actual source/header,
+compiler bytes/version/target, linker, argv, ELF binary and dynamic loader/library
+identities. Observed host gcc13.3/glibc2.39 are not substituted for measured pins.
+Exclusive private staging, fsync, rename, parent sync and readback protect build
+publication. Existing outputs are refused. No binary/manifest is committed and no
+cross-toolchain bit reproducibility is claimed.
+
+The new mandatory native suite compiles/runs production plus distinct C syscall/
+parser/pipe/retainer fixtures and separate ASan+UBSan. Its compile-time fake cgroup/
+clone operations are never part of production; real disposable pipes/children/waits
+are conditional source tests, not kernel placement/emptiness acceptance. Positive
+adapter tests load the actual module under --experimental-vm-modules in disposable
+subprocesses with synthetic UID1000, filesystem/manager/process/child facades. They
+include actual A16 issuer/worker→adapter IPC→immutable evidence→A15 verification and
+reservation/report separation. UID normalization and kernel assertions exist only
+inside those test facades, never a production option. Native full fixtures run beside
+all package tests; no silent native skip is permitted.
+
+The archive integration harness builds native before Gateway/auth installation and
+passes its private artifact path to package tests. Gateway pin and zero-skip gates
+remain unchanged. In the Developer container no gcc/cc/clang/ld/lld/make is available;
+mandatory native build/test and the updated pinned harness therefore FAIL explicitly.
+This is an unresolved prerequisite, not a skipped PASS or completed native acceptance.
+Per owner direction the Draft may be published with this evidence, but the owner/host
+coordinator must compile and run native production/harness/sanitizer tests at the exact
+published head using measured host toolchain before independent Reviewer handoff.
+No compiler installation/container change is authorized. Full package/native/host
+results must be reported separately, without implying failed native gates passed.
+
+Separate future owner-authorized host acceptance must substantiate effective service
+properties, actual delegation/clone3-before-operation, runtime/closure/build pins,
+fast exit/descendants/deadline kill, positive retained same-inode empty+reap before
+removal, no management FD leak and exact cleanup. Helper/MainPID/manager death,
+clock/pin/permission/seccomp/kill/I/O stalls and critical crash boundaries require
+measured evidence. Untested catastrophic conditions stay NOT_TESTED. No live tests,
+service installation or cgroup mutation are performed in this source job.
+
+Rollback is a reviewed source revert with unchanged v2/journal format. Operational
+rollback remains separate: stop admissions, establish exact owned-work containment,
+retain attempts/proofs/report obligations, then change binaries. Never delete claims,
+reset namespaces or re-admit to conceal UNKNOWN. Shared-UID mutation/ABA, imported
+artifact TOCTOU, manager liveness, D-state, storage/quota/power-loss and service-stop
+races remain host gates. Native reporting/bootstrap/activation/broader operations,
+#21 isolation and Gateway#11 are excluded; H1–H9 live remain NOT_READY.
