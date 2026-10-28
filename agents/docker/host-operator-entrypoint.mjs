@@ -30,6 +30,11 @@ function mounts(paths) {
     if (!record || !record[5].split(',').includes(readonly ? 'ro' : 'rw')) deny();
   }
 }
+// ext4 recovery metadata is root-owned, never agent configuration or repairable state.
+export function validateRecoveryDirectory(stat) {
+  if (!stat.isDirectory() || stat.isSymbolicLink() || stat.uid!==0 || stat.gid!==0 ||
+      (stat.mode&0o7777)!==0o700 || stat.nlink!==2) deny();
+}
 // Dependency injection is a library-only fixture seam; CLI has no override flags or env.
 export function validateHostOperator({ env = process.env, paths = layout, identity = owner,
   uid = process.getuid(), gid = process.getgid(), statfs = fs.statfsSync, checkMounts = mounts } = {}) {
@@ -67,7 +72,9 @@ export function validateHostOperator({ env = process.env, paths = layout, identi
   const name=JSON.parse(match[1]),email=JSON.parse(match[2]);
   if (!name.trim() || name !== name.trim() || name.length>254 || email.length>254 || /[\p{Cc}\p{Cf}<>]/u.test(name+email) || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/u.test(email) || render({agentId:'host-operator',name,email}) !== git) deny();
   // Reject configuration authority while allowing session/cache files on restart.
-  const homeNames=['.agent','.cache','.config','.codex','.local','.npm','.gitconfig'];
+  const recovery=paths.home+'/lost+found';
+  if (exists(recovery)) { safePath(recovery); validateRecoveryDirectory(fs.lstatSync(recovery)); }
+  const homeNames=['lost+found','.agent','.cache','.config','.codex','.local','.npm','.gitconfig'];
   if (fs.readdirSync(paths.home).some(n=>!homeNames.includes(n))) deny();
   for (const dir of ['.agent','.cache','.config','.codex','.local','.npm']) if (exists(paths.home+'/'+dir)) directory(paths.home+'/'+dir,identity);
   const persisted=paths.home+'/.gitconfig'; if (exists(persisted) && privateFile(persisted,identity)!==git) deny();

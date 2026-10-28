@@ -1,0 +1,5 @@
+{
+  "identities": [
+    { "agentId": "host-operator", "name": "Fixture Host Operator", "email": "host-operator@agents.example.test" }
+  ]
+}

@@ -810,3 +810,33 @@ workspace and resource-host suites remain required for compatibility.
 Rollback of F1 is a source revert with the profile off; no production state changes.
 Future deployment rollback stops only the fourth profile and preserves its identity
 and state. Never delete or reset AGE #7 claims/proofs/journal or renew pending work.
+
+## F2 selective provisioning source
+
+The fourth remains opt-in and disconnected. Every fourth provisioning entrypoint
+requires explicit `--agent host-operator`; defaults and existing original-role forms
+still operate on three only, regardless of HOST_OPERATOR variables/profile selection.
+No Gateway inputs/token/App, GH/SSH credential or Executor is provisioned for it.
+
+After source review and separate owner execution authorization, use an external
+trusted env file and the fixed `AGENT_RUNTIME_ROOT/host-operator/{credentials,workspace}`
+and `state-storage/host-operator` paths. Selected runtime validates public fourth and
+legacy Git mappings, path disjointness and existing metadata before sudo/writes; it
+creates only missing fourth directories and managed gitconfig under provision.lock.
+It reports missing auth files, never issues credentials or implicitly formats state.
+Conflicts are preserved. Selected repository provisioning uses independent no-hardlinks
+clones; existing full clones must have correct origin, no linked Git metadata/alternates
+or shared object files and are preserved without fetch/reset. Runtime workspace stays RO.
+
+Read [HOST_OPERATOR_F2_ACCEPTANCE.md](HOST_OPERATOR_F2_ACCEPTANCE.md) before any live
+step. It specifies independent Buzz public-key roster, device-login/Codex cache custody,
+dedicated Kaneo actor proof, actual ACP nonce tests, negative owner admission, singleton,
+restart/recreation, old-three separation, no-secret evidence and fourth-only rollback.
+A successful fixture is not live identity/ACP acceptance or F3/#10/#21 authorization.
+
+Available fixtures: Node Git/guard/storage suites; unprivileged offline
+`TEST_EXECUTABLE_TMPDIR=<private executable scratch> bash agents/scripts/test-host-operator-identity.sh`
+(controlled command doubles, no cryptographic/live claim); separately authorized root
+`test-host-operator-provisioning.sh <isolated-test-Codex-image>`, existing legacy
+`test-provision-runtime.sh`, workspace/resource host fixtures and build/smoke. Never run
+root fixtures against real state or treat missing Docker/compiler/root as a passing skip.

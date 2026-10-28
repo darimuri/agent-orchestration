@@ -76,7 +76,7 @@ cp "${root_dir}/git-identities.example.json" "${scratch_dir}/git-identities.json
 expect_runtime_failure() {
   local label="$1"
   local candidate_env="$2"
-  if PROVISION_RUNTIME_TEST_MODE="${PROVISION_RUNTIME_TEST_MODE:-0}" \
+  if PROVISION_RUNTIME_TEST_MODE=1 \
     "${root_dir}/scripts/provision-runtime.sh" "${candidate_env}" >/dev/null 2>&1; then
     printf 'Unsafe runtime configuration was accepted: %s\n' "${label}" >&2
     exit 1
@@ -123,9 +123,9 @@ printf 'REVIEWER_WORKSPACE=%s\n' \
   "${scratch_dir}/agent-runtime/reviewer-link" >>"${symlink_env}"
 expect_runtime_failure 'symlinked managed path' "${symlink_env}"
 
-PROVISION_RUNTIME_TEST_MODE="${PROVISION_RUNTIME_TEST_MODE:-0}" \
+PROVISION_RUNTIME_TEST_MODE=1 \
   "${root_dir}/scripts/provision-runtime.sh" "${env_file}" >/dev/null
-PROVISION_RUNTIME_TEST_MODE="${PROVISION_RUNTIME_TEST_MODE:-0}" \
+PROVISION_RUNTIME_TEST_MODE=1 \
   "${root_dir}/scripts/provision-agent-repository.sh" \
   test-org/test-repo main "${env_file}" >/dev/null
 
@@ -142,7 +142,7 @@ for workspace in dispatcher developer reviewer; do
   test "$(as_root stat -c '%u' "${scratch_dir}/agent-runtime/${workspace}/credentials")" = 10001
   test "$(as_root stat -c '%a' "${scratch_dir}/agent-runtime/${workspace}/credentials")" = 700
 done
-if PROVISION_RUNTIME_TEST_MODE="${PROVISION_RUNTIME_TEST_MODE:-0}" \
+if PROVISION_RUNTIME_TEST_MODE=1 \
   "${root_dir}/scripts/provision-agent-repository.sh" \
   other-org/test-repo main "${env_file}" >/dev/null 2>&1; then
   printf 'Repository outside the configured organization was accepted.\n' >&2
@@ -150,7 +150,7 @@ if PROVISION_RUNTIME_TEST_MODE="${PROVISION_RUNTIME_TEST_MODE:-0}" \
 fi
 (
   flock -n 9
-  if PROVISION_RUNTIME_TEST_MODE="${PROVISION_RUNTIME_TEST_MODE:-0}" \
+  if PROVISION_RUNTIME_TEST_MODE=1 \
     "${root_dir}/scripts/provision-agent-repository.sh" \
     test-org/test-repo main "${env_file}" >/dev/null 2>&1; then
     printf 'Concurrent repository provisioning was accepted.\n' >&2
@@ -202,9 +202,9 @@ as_root node --input-type=module -e '
   delete config.roles.control;
   await writeFile(file, `${JSON.stringify(config, null, 2)}\n`);
 ' "${scratch_dir}/agent-runtime/github-gateway/apps.json"
-PROVISION_RUNTIME_TEST_MODE="${PROVISION_RUNTIME_TEST_MODE:-0}" \
+PROVISION_RUNTIME_TEST_MODE=1 \
   "${root_dir}/scripts/provision-runtime.sh" "${env_file}" >/dev/null
-PROVISION_RUNTIME_TEST_MODE="${PROVISION_RUNTIME_TEST_MODE:-0}" \
+PROVISION_RUNTIME_TEST_MODE=1 \
   "${root_dir}/scripts/provision-agent-repository.sh" \
   test-org/test-repo main "${env_file}" >/dev/null
 dispatcher_hash_after="$(as_root sha256sum "${scratch_dir}/agent-runtime/dispatcher/credentials/github-gateway-agent-token")"
@@ -290,3 +290,6 @@ as_root cmp "${identity_file}" "${scratch_dir}/agent-runtime/reviewer/credential
 restore_identity
 as_root "${root_dir}/scripts/preflight.sh" "${env_file}" >/dev/null
 printf 'Runtime provisioning and identity tests passed.\n'
+# Legacy default must remain exactly three even when fourth selection inputs exist.
+[[ ! -e "$scratch_dir/agent-runtime/host-operator" ]]
+printf 'Legacy default did not allocate a fourth runtime.\n'

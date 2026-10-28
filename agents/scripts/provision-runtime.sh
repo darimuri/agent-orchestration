@@ -2,6 +2,13 @@
 set -euo pipefail
 
 root_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+selected_host=false
+if [[ "${1:-}" == --agent ]]; then
+  [[ "${2:-}" == host-operator && $# -ge 2 && $# -le 3 ]] || { echo 'invalid explicit agent selector' >&2; exit 1; }
+  selected_host=true; shift 2
+elif [[ "${1:-}" == -* || $# -gt 1 ]]; then echo 'invalid provisioning arguments' >&2; exit 1
+fi
+readonly selected_host
 env_file="${1:-${root_dir}/.env}"
 repository_root="$(cd "${root_dir}/.." && pwd)"
 host_home="${HOME}"
@@ -20,6 +27,30 @@ set -a
 # shellcheck disable=SC1090
 source "${env_file}"
 set +a
+
+if [[ "$selected_host" == true ]]; then
+  : "${AGENT_RUNTIME_ROOT:?AGENT_RUNTIME_ROOT required}"
+  : "${HOST_OPERATOR_GIT_IDENTITY_MANIFEST:?fourth public Git manifest required}"
+  : "${AGENT_GIT_IDENTITY_MANIFEST:?legacy public Git manifest required}"
+  node "$root_dir/docker/git-identity.mjs" validate-host "$HOST_OPERATOR_GIT_IDENTITY_MANIFEST" "$AGENT_GIT_IDENTITY_MANIFEST"
+  node "$root_dir/docker/git-identity.mjs" validate-host-layout "$AGENT_RUNTIME_ROOT"
+  lock_dir="${XDG_RUNTIME_DIR:-$HOME/.cache/darimuri-agent-orchestration}"
+  install -d -m 0700 "$lock_dir"
+  exec {host_lock_fd}>"$lock_dir/provision.lock"
+  flock -n "$host_lock_fd" || die 'another provisioning process is running'
+  as_root_host() { if (( EUID == 0 )); then "$@"; else sudo "$@"; fi; }
+  if (( EUID != 0 )); then sudo -v; fi
+  node_path="$(command -v node)"
+  as_root_host "$node_path" "$root_dir/docker/git-identity.mjs" check-install-host "$HOST_OPERATOR_GIT_IDENTITY_MANIFEST" "$AGENT_GIT_IDENTITY_MANIFEST" "$AGENT_RUNTIME_ROOT/host-operator/credentials"
+  as_root_host "$node_path" "$root_dir/docker/git-identity.mjs" prepare-host-layout "$AGENT_RUNTIME_ROOT"
+  as_root_host "$node_path" "$root_dir/docker/git-identity.mjs" install-host "$HOST_OPERATOR_GIT_IDENTITY_MANIFEST" "$AGENT_GIT_IDENTITY_MANIFEST" "$AGENT_RUNTIME_ROOT/host-operator/credentials"
+  for name in buzz-private-key buzz-auth-tag kaneo-credentials.json; do
+    if ! as_root_host test -f "$AGENT_RUNTIME_ROOT/host-operator/credentials/$name"; then printf 'Fourth credential missing: %s\n' "$name"; fi
+  done
+  if ! as_root_host test -f "$AGENT_RUNTIME_ROOT/host-operator/credentials/codex-auth.json" && ! as_root_host test -f "$AGENT_RUNTIME_ROOT/host-operator/credentials/openai-api-key"; then echo 'Fourth Codex input missing'; fi
+  echo 'Fourth-only layout ready; no auth, state image or Gateway provisioned.'
+  exit 0
+fi
 
 : "${GATEWAY_AGENT_TOKEN_TTL_DAYS:=30}"
 : "${DISPATCHER_PROVIDER:=claude}"

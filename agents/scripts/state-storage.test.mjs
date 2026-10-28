@@ -42,3 +42,9 @@ test('loop mount must match exact image, device, security flags, zero offset and
   assert.throws(() => validateMount(p, null, [loop]));
   assert.throws(() => validateMount(p, info, [loop, loop]));
 });
+
+test('selected fourth plan is isolated and does not expand legacy roles/defaults',async t=>{
+ const{planHost,roles}=await import('./state-storage.mjs');const root=fs.mkdtempSync(path.join(os.tmpdir(),'host-state-plan-'));t.after(()=>fs.rmSync(root,{recursive:true,force:true}));
+ const selected=planHost(root+'/runtime');assert.equal(selected.length,1);assert.equal(selected[0].role,'host-operator');assert.equal(selected[0].bytes,536870912);assert(selected[0].image.endsWith('/state-storage/host-operator.img'));
+ assert.equal(plan(root+'/runtime').length,3);assert.deepEqual(roles,['dispatcher-planner','developer-a','reviewer-a']);assert.equal(planHost(root+'/runtime','67108864')[0].bytes,67108864);assert.throws(()=>planHost(root+'/runtime','0'));assert.deepEqual(fs.readdirSync(root),[]);
+});

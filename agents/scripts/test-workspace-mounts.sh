@@ -19,3 +19,8 @@ for role in dispatcher developer reviewer; do
     ' "${role}"
 done
 printf '%s\n' 'Disposable role mount writes passed'
+# Explicit fourth conversation role has the same read-only workspace guarantee.
+install -d -m 0755 -o 10001 -g 10001 "$scratch/host-operator"
+docker run --rm --network none --read-only --cap-drop ALL --user 10001:10001 \
+  --mount "type=bind,src=$scratch/host-operator,dst=/workspace,readonly" \
+  --entrypoint node "$image" -e 'try{require("node:fs").writeFileSync("/workspace/probe","fixture");process.exit(1);}catch(e){if(!["EROFS","EACCES"].includes(e.code))throw e;}'

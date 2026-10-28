@@ -164,3 +164,22 @@ owner-prepared in F2; F1 tests render dummy fixtures only. Do not add it to the 
 manifest, clone another identity or infer a real Git/Buzz/Kaneo actor from a name.
 The Host Operator startup guard also refuses a persisted identity that differs from
 its mounted fourth record. Conflicting objects remain for owner investigation.
+
+## F2 explicit fourth provisioning
+
+Legacy `personas`, manifest validation and install/check still require exactly three.
+The fourth has a separate external manifest (fixture-only shape in
+`host-operator-git-identity.example.json`) with exactly one `host-operator` record.
+`validate-host`, `check-install-host`, `install-host`, and `check-host` accept the
+fourth manifest, then the approved legacy manifest, then (except validate) the fourth
+credential directory. They reject a case-insensitive name/email collision with any
+legacy record, malformed keys, links, wrong ownership/modes or a conflicting existing
+config. A rerun preserves conflicting data for manual review; no host/global Git
+identity is inferred. Selected runtime invokes installation under the existing
+provision.lock; only its own fourth paths may be created.
+
+The CLI selector is `--agent host-operator` for runtime/repository/preflight/storage,
+Buzz and Kaneo provisioning. Positional `host-operator`, repeated/mixed/unknown selectors
+are rejected. Existing positional forms for the original three remain supported.
+Fourth state is independent; a managed Git name does not establish distinct Buzz,
+Kaneo or Codex identity. The acceptance runbook requires public actor/key evidence.

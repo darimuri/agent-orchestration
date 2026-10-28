@@ -7,8 +7,18 @@ if [[ "${1:-}" == --replace ]]; then
   replace=true
   shift
 fi
-role="${1:-}"
-env_file="${2:-${root_dir}/.env}"
+selected_host=false
+if [[ "${1:-}" == --agent ]]; then
+  [[ "${2:-}" == host-operator && $# -ge 2 && $# -le 3 ]] || { echo 'invalid fourth selector' >&2; exit 1; }
+  selected_host=true; shift 2
+  role=host-operator
+  env_file="${1:-${root_dir}/.env}"
+else
+  [[ "${1:-}" != host-operator && $# -le 2 ]] || { echo 'fourth requires --agent host-operator' >&2; exit 1; }
+  role="${1:-}"
+  env_file="${2:-${root_dir}/.env}"
+fi
+readonly selected_host
 
 die() {
   printf 'provision-kaneo-credential: %s\n' "$*" >&2
@@ -16,7 +26,7 @@ die() {
 }
 
 if [[ "${role}" == --help || "${role}" == -h ]]; then
-  printf 'Usage: %s [--replace] <dispatcher-planner|developer-a|reviewer-a> [env-file]\n' "$0"
+  printf 'Usage: %s [--replace] <dispatcher-planner|developer-a|reviewer-a> [env-file] OR --agent host-operator [env-file]\n' "$0"
   exit 0
 fi
 
@@ -29,7 +39,16 @@ set -a
 source "${env_file}"
 set +a
 
+if [[ "$selected_host" == true ]]; then
+  : "${AGENT_RUNTIME_ROOT:?AGENT_RUNTIME_ROOT required}"
+  : "${HOST_OPERATOR_KANEO_USER_ID:?dedicated public actor mapping required}"
+  node "$root_dir/docker/git-identity.mjs" validate-host-layout "$AGENT_RUNTIME_ROOT"
+fi
 case "${role}" in
+  host-operator)
+    [[ "$selected_host" == true ]] || die 'explicit fourth selector required'
+    credentials_dir="$AGENT_RUNTIME_ROOT/host-operator/credentials"
+    ;;
   dispatcher-planner)
     credentials_dir="${DISPATCHER_CREDENTIALS_DIR:-}"
     ;;
@@ -64,6 +83,11 @@ exec {provision_lock_fd}>"${provision_lock_dir}/provision.lock"
 flock -n "${provision_lock_fd}" \
   || die "another agent provisioning process is already running"
 
+if [[ "$selected_host" == true ]]; then
+  : "${HOST_OPERATOR_GIT_IDENTITY_MANIFEST:?fourth public Git manifest required}"
+  : "${AGENT_GIT_IDENTITY_MANIFEST:?legacy public Git manifest required}"
+  sudo "$node_path" "$root_dir/docker/git-identity.mjs" check-host "$HOST_OPERATOR_GIT_IDENTITY_MANIFEST" "$AGENT_GIT_IDENTITY_MANIFEST" "$credentials_dir"
+fi
 destination="${credentials_dir}/kaneo-credentials.json"
 if sudo test -e "${destination}"; then
   [[ "${replace}" == true ]] \

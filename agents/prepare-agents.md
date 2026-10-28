@@ -344,3 +344,18 @@ github-gateway-agent-token
 Credential 디렉터리는 mode `0700`, 내부 파일은 `0600`, 소유자는 UID/GID
 `10001:10001`이어야 한다. GitHub App private key, Codex 인증정보, Kaneo 세션,
 Buzz private key는 Git에 commit하지 않는다.
+
+## Fourth role: selective F2 procedure only
+
+Do not append `host-operator` to legacy three-agent loops or reuse another persona's
+private key/HOME/Codex login/Kaneo session. Follow `HOST_OPERATOR_F2_ACCEPTANCE.md` after
+explicit owner deployment authorization. Source PR review does not authorize these
+host/browser/network effects. All fourth selectors are literal `--agent host-operator`.
+
+The owner prepares a separate fourth Git manifest and approved three-key public roster,
+then runs selected runtime and selected bounded storage, adds only necessary independent
+RO clones, and installs independent owner-generated Buzz, dedicated Kaneo account device
+session and fourth Codex login credentials. Existing provisioners still default to
+three; selected runtime exits before any Gateway requirement or write. No new Gateway
+role or Executor mount is introduced. Metadata preflight is distinct from live account,
+model/ACP and authorization acceptance. Leave normal ext4 lost+found untouched.
