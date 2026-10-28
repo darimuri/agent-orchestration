@@ -148,3 +148,19 @@ approved commits before accepting live attribution. Do not guess a bot noreply I
 The code/fixture PR does not complete AGE #2's operational acceptance: approved
 production mapping, container recreation/persistence and actual GitHub attribution
 remain explicit host/reviewer follow-ups. Signing decisions are outside this change.
+
+## F1 fourth role: apply-only compatibility
+
+`git-identity.mjs apply` additionally accepts `host-operator` with the exact managed
+`# Managed agent Git identity v1: host-operator` record. The same private0700
+credential directory, ordinary single-link0600 file, name/email grammar,
+`useConfigOnly=true`, ownership and symlink rules apply. A missing or wrong-persona
+mounted record cannot fall back to persisted HOME identity.
+
+`personas`, legacy manifests and validate/install/check still require exactly the
+original three identities/directories in their original order. The committed example
+manifest and all provisioners are unchanged. A fourth managed record is separately
+owner-prepared in F2; F1 tests render dummy fixtures only. Do not add it to the legacy
+manifest, clone another identity or infer a real Git/Buzz/Kaneo actor from a name.
+The Host Operator startup guard also refuses a persisted identity that differs from
+its mounted fourth record. Conflicting objects remain for owner investigation.

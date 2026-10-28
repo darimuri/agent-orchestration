@@ -187,3 +187,16 @@ docker run "${common_args[@]}" \
   '
 
 printf 'Container entrypoint smoke tests passed.\n'
+
+# F1 fourth-role source smoke: dummy credentials/private temporary HOME only.
+# These library fixtures explicitly inject filesystem/mount measurements; they are
+# NOT deployment storage/identity/ACP/Executor acceptance. Production guard has no
+# CLI/environment bypass. The tests exercise real generic credential loading,
+# COMMON+role prompt/Git/Codex/Kaneo config, flock conflict/restart/child crash and
+# missing/wrong/foreign credentials; no buzz-acp or live operation is started.
+docker run --rm --network none --read-only \
+  --tmpfs /tmp:rw,noexec,nosuid,nodev,size=128m,uid=10001,gid=10001 \
+  --entrypoint node \
+  --mount "type=bind,src=${root_dir},dst=/test,readonly" \
+  "${codex_image}" --test /test/docker/host-operator-entrypoint.test.mjs
+printf 'Disconnected Host Operator source smoke passed (synthetic mount measurements).\n'

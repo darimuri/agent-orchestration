@@ -9,4 +9,7 @@ if [[ -n "${AGENT_STATE_CAPACITY_BYTES:-}" ]]; then
       exit 1
     }
 fi
+if [[ "${AGENT_ROLE:-}" == "host-operator" ]]; then
+  exec node "$(dirname "${BASH_SOURCE[0]}")/host-operator-entrypoint.mjs" "$@"
+fi
 exec /usr/local/bin/agent-entrypoint "$@"

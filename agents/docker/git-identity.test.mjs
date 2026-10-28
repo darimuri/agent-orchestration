@@ -221,3 +221,16 @@ test('CLI rejects malformed JSON with value-free diagnostics', t => {
   assert.notEqual(result.status, 0); assert.equal(result.stdout, '');
   assert.ok(!result.stderr.includes('private-sentinel'));
 });
+
+test('fourth persona is apply-only; legacy manifest and persona order stay exactly three', t => {
+  const {root,records}=setup(t); const dir=path.join(root,'host');fs.mkdirSync(dir,{mode:0o700});
+  const record={agentId:'host-operator',name:'Fixture Host Operator',email:'host@agents.example.test'};
+  const source=path.join(dir,'gitconfig'),destination=path.join(root,'.gitconfig');fs.writeFileSync(source,render(record),{mode:0o600});
+  applyIdentity(source,destination,'host-operator');assert.equal(fs.readFileSync(destination,'utf8'),render(record));
+  assert.deepEqual(personas,['dispatcher-planner','developer-a','reviewer-a']);
+  assert.throws(()=>validateManifest({identities:[...records,record]}));
+  assert.throws(()=>validateManifest({identities:[record,...records.slice(1)]}));
+  assert.throws(()=>applyIdentity(source,destination,'developer'));
+  fs.writeFileSync(source,render(records[0]));assert.throws(()=>applyIdentity(source,destination,'host-operator'));
+  assert.equal(fs.readFileSync(destination,'utf8'),render(record));
+});

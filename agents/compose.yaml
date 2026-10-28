@@ -190,3 +190,53 @@ services:
         target: /home/agent
         bind:
           create_host_path: false
+
+  host-operator:
+    profiles: [host-operator]
+    <<: *agent-common
+    cpus: ${HOST_OPERATOR_CPUS:-1.0}
+    mem_limit: ${HOST_OPERATOR_MEM_LIMIT:-2g}
+    # Equal memory + swap total means no container swap.
+    memswap_limit: ${HOST_OPERATOR_MEM_LIMIT:-2g}
+    image: local/buzz-agent-codex:${AGENT_CODEX_VERSION:-0.163.0}
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.codex
+      args:
+        BUZZ_SPRIG_IMAGE: ${AGENT_BUZZ_SPRIG_IMAGE:-ghcr.io/block/buzz-sprig:sha-6530b58@sha256:17facfc7608d8ddb33bc056c9aaba1098f4ef6abe5655702fbfd7584d1f74d76}
+        CODEX_VERSION: ${AGENT_CODEX_VERSION:-0.163.0}
+        CODEX_ACP_VERSION: ${AGENT_CODEX_ACP_VERSION:-2.2.2}
+        KANEO_MCP_VERSION: ${AGENT_KANEO_MCP_VERSION:-0.1.11}
+    environment:
+      <<: *common-environment
+      AGENT_PROVIDER: codex
+      AGENT_STATE_CAPACITY_BYTES: ${HOST_OPERATOR_STATE_BYTES:-536870912}
+      AGENT_ROLE: host-operator
+      AGENT_ROLE_PROMPT: /run/agent/prompts/HOST_OPERATOR.md
+      BUZZ_ACP_MODEL: ${HOST_OPERATOR_MODEL:-gpt-5.3-codex}
+      BUZZ_ACP_SESSION_TITLE: Host Operator
+      ENABLE_GITHUB_GATEWAY_MCP: "false"
+    volumes:
+      - type: bind
+        source: ./prompts
+        target: /run/agent/prompts
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${AGENT_RUNTIME_ROOT:?set AGENT_RUNTIME_ROOT}/host-operator/credentials
+        target: /run/agent/credentials
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${AGENT_RUNTIME_ROOT:?set AGENT_RUNTIME_ROOT}/host-operator/workspace
+        target: /workspace
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${AGENT_RUNTIME_ROOT:?set AGENT_RUNTIME_ROOT}/state-storage/host-operator
+        target: /home/agent
+        bind:
+          create_host_path: false

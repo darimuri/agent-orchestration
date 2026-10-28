@@ -757,3 +757,56 @@ operational **NOT_READY / INDEPENDENTLY_UNVERIFIED**. Caller JSON cannot authori
 an operation or produce host PASS. All A4 host rows remain UNRESOLVED / NOT READY.
 See the linked schema, bounds, fixed diagnostics, stdin usage and separate owner/
 independent-review obligations. No live acceptance or runtime change is implied.
+
+## Opt-in Host Operator (F1 source only)
+
+`host-operator` is a fourth Codex/ACP conversation role under the explicit
+`host-operator` Compose profile. Default selection preserves the existing three
+agents and Gateway. The fourth role has no dependency on Gateway or an Executor,
+no Gateway token/MCP, no socket or host authority. Its workspace and credentials
+are read-only; only its independently bounded HOME is writable. All four binds
+require existing paths (`create_host_path: false`). Paths derive from
+`AGENT_RUNTIME_ROOT`, so inactive-profile rendering needs no new variables.
+Defaults: `HOST_OPERATOR_MODEL=gpt-5.3-codex`, CPU1, RAM2GiB with equal memswap,
+state536870912 bytes. Model availability and capacity require later owner acceptance.
+Image/ACP/direct Codex/bundled Codex versions are unchanged.
+
+F1 does not prepare or start this role. The existing runtime/repository/Buzz/Kaneo
+provisioners still manage exactly three roles; **do not append the fourth to global
+loops or copy another role's credentials/HOME**. F2 requires selective provisioning,
+independent Nostr and Codex session custody, Kaneo actor mapping, and owner-prepared
+bounded ext4 HOME and RO workspace. Browser/device flows and mounts remain owner work.
+No real credentials or identity were issued by this source phase.
+
+The bounded entrypoint checks storage first, then invokes the fourth-only guard
+before the generic loader reads credentials. It requires UID:GID10001, fixed paths,
+private allowlisted files, owner-only policy, Codex and Kaneo-only configuration.
+Missing owner tag, wrong Git persona, foreign files (including Gateway/SSH/GH),
+MCP/config hooks and contaminated persisted identity fail closed without deletion.
+Session/cache files are retained; managed Codex config must contain only the exact
+Kaneo registration. No custom Codex profiles/transport/shell overrides are accepted.
+
+A private `~/.local/state/host-operator/instance.lock` FD is nonblockingly flocked
+through the ACP process tree. Conflict exits75 before generic credential loading;
+the file is never unlinked. This is cooperative same-HOME exclusion, not hostile
+same-UID or cross-host/key-cloning isolation. No global singleton is claimed.
+
+`prompts/HOST_OPERATOR.md` is the actual role prompt, composed with COMMON.
+`HOST_OPERATOR.md` remains the AGE #7 library/host runbook, not the ACP prompt.
+Without reviewed F3 IPC, the role reports “Executor unavailable / no execution
+requested”. No mock success, cgroup backend import or host access is supplied.
+The conversational UID10001 role is distinct from the non-LLM UID1000 Executor.
+Observation/completion/report receipts and UNKNOWN/deadline semantics remain AGE #7's.
+All H1–H9 live gates and issue #21 remain separate.
+
+Validation: full Node suite; `scripts/test-resource-config.sh` for credential-free
+Compose defaults/profile/override/negative rendering; `scripts/build-and-smoke.sh`
+on a separately authorized disposable Docker host. Fourth smoke uses synthetic mount
+measurements with dummy credentials and the actual generic loader/Git/MCP generation,
+real flock conflict/child lifetime/restart tests. It does not start ACP or prove live
+bounded mounts. Existing Codex runtime smoke is unchanged. Docker/compiler/privilege
+absence is an unmet gate, never a skipped PASS. Existing disposable provisioning,
+workspace and resource-host suites remain required for compatibility.
+Rollback of F1 is a source revert with the profile off; no production state changes.
+Future deployment rollback stops only the fourth profile and preserves its identity
+and state. Never delete or reset AGE #7 claims/proofs/journal or renew pending work.

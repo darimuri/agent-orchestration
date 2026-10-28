@@ -10,8 +10,8 @@ const fail = (message) => { throw new IdentityError(message); };
 const exactKeys = (value, keys) => value && typeof value === 'object'
   && !Array.isArray(value) && Object.keys(value).sort().join(',') === [...keys].sort().join(',');
 
-function validateRecord(record) {
-  if (!exactKeys(record, ['agentId', 'name', 'email']) || !personas.includes(record.agentId)) {
+function validateRecord(record, hostApply = false) {
+  if (!exactKeys(record, ['agentId', 'name', 'email']) || !(personas.includes(record.agentId) || (hostApply && record.agentId === 'host-operator'))) {
     fail('invalid identity record or persona');
   }
   for (const key of ['name', 'email']) {
@@ -127,7 +127,7 @@ export function check(records, directories, owner = runtimeOwner) {
 
 export function applyIdentity(source, destination, role, owner = runtimeOwner) {
   const persona = ({ developer: 'developer-a', reviewer: 'reviewer-a' })[role] ?? role;
-  if (!personas.includes(persona)) fail('unknown identity persona');
+  if (!personas.includes(persona) && persona !== 'host-operator') fail('unknown identity persona');
   privateDirectory(path.dirname(source), owner);
   privateFile(source, owner);
   const content = fs.readFileSync(source, 'utf8');
@@ -137,7 +137,7 @@ export function applyIdentity(source, destination, role, owner = runtimeOwner) {
   let record;
   try { record = { agentId: persona, name: JSON.parse(match[2]), email: JSON.parse(match[3]) }; }
   catch { fail('invalid managed gitconfig'); }
-  validateRecord(record);
+  validateRecord(record, true);
   if (render(record) !== content) fail('invalid managed gitconfig');
   atomicWrite(destination, content, owner);
 }

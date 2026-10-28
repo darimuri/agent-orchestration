@@ -11,7 +11,7 @@ ARG KANEO_MCP_VERSION=0.1.11
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
-       bash ca-certificates curl git jq openssh-client ripgrep tini \
+       bash ca-certificates curl git jq openssh-client ripgrep tini util-linux \
     && rm -rf /var/lib/apt/lists/* \
     && npm install -g \
        "@openai/codex@${CODEX_VERSION}" \
@@ -22,6 +22,7 @@ RUN apt-get update \
 COPY --from=buzz-runtime /usr/local/bin/sprig /usr/local/bin/sprig
 COPY docker/agent-entrypoint.sh /usr/local/bin/agent-entrypoint
 COPY docker/bounded-agent-entrypoint.sh /usr/local/bin/bounded-agent-entrypoint
+COPY docker/host-operator-entrypoint.mjs /usr/local/bin/host-operator-entrypoint.mjs
 COPY docker/check-state-storage.mjs /usr/local/bin/check-state-storage.mjs
 COPY docker/git-identity.mjs /usr/local/bin/git-identity.mjs
 COPY docker/generate-mcp-config.mjs /usr/local/libexec/generate-mcp-config.mjs

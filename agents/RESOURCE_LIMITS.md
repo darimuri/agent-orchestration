@@ -245,3 +245,22 @@ and journal continuation acceptance. Static tests alone do not establish enforce
 - [util-linux mount loop support](https://man7.org/linux/man-pages/man8/mount.8.html)
 - [util-linux losetup safety and backing-file inspection](https://man7.org/linux/man-pages/man8/losetup.8.html)
 - [e2fsprogs mke2fs filesystem sizing](https://man7.org/linux/man-pages/man8/mke2fs.8.html)
+
+## Disconnected fourth profile (F1)
+
+The optional `host-operator` profile defaults to1CPU,2GiB memory and equal memswap,
+with `HOST_OPERATOR_STATE_BYTES=536870912`. These proposed bounds are configurable
+through HOST_OPERATOR_CPUS/MEM_LIMIT/STATE_BYTES and are not host-capacity acceptance.
+It inherits read-only root, dropped capabilities, no-new-privileges, pid/tmpfs limits.
+Its only binds are RO prompts, RO credentials, RO workspace and RW bounded private
+HOME; each has `create_host_path:false`. No socket, device, host PID/network,
+Gateway/job ledger/cgroup/root mount or extra group is permitted. The resource verifier
+keeps three-only normalized fixtures valid and checks the strict fourth contract
+when present, including opt-in profile, Codex prompt/provider and Kaneo-only MCP.
+
+The existing state-storage/provisioning tools still support three roles; F1 creates,
+formats, mounts or resizes no image. F2 must add selective owner provisioning and
+independent fourth identity/state acceptance. Production guard requires an actual
+bounded ext4 HOME and exact RO mounts. The source smoke's injected statfs/mount fixture
+is explicitly synthetic and cannot establish this operational gate. No tmpfs or
+unbounded fallback is allowed in the fourth production startup path.
