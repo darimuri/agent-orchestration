@@ -34,7 +34,7 @@ function verifyHostOperator(s) {
   if(!root || !home.source.endsWith(suffix) || volumes.length!==4) throw Error('fourth role mount contract');
   for(const [target,source,ro] of [['/home/agent',root+suffix,false],['/workspace',root+'/host-operator/workspace',true],['/run/agent/credentials',root+'/host-operator/credentials',true],['/run/agent/prompts',null,true]]) {
     const matches=volumes.filter(v=>v.target===target);const v=matches[0];
-    if(matches.length!==1 || v.type!=='bind' || v.bind?.create_host_path!==false || !!v.read_only!==ro ||
+    if(matches.length!==1 || v.type!=='bind' || !v.bind || typeof v.bind!=='object' || Array.isArray(v.bind) || v.bind.create_host_path===true || !!v.read_only!==ro ||
         (source?v.source!==source:!v.source?.endsWith('/prompts'))) throw Error('fourth role mount contract');
   }
 }
