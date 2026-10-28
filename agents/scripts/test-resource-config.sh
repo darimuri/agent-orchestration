@@ -27,6 +27,7 @@ node "$root_dir/scripts/verify-resource-config.mjs" "$scratch/config.json"
 node --input-type=module - "$scratch/config.json" <<'JS'
 import fs from 'node:fs'; import assert from 'node:assert/strict';
 const { services } = JSON.parse(fs.readFileSync(process.argv[2]));
+assert.equal(services['host-operator'], undefined);
 for (const [role, cpu, memory, state] of [['dispatcher-planner',1,2,536870912],['developer-a',4,8,2147483648],['reviewer-a',2,4,1073741824]]) {
   const s = services[role]; assert.equal(Number(s.cpus), cpu); assert.equal(Number(s.mem_limit), memory * 1024 ** 3);
   assert.equal(Number(s.environment.AGENT_STATE_CAPACITY_BYTES), state);
@@ -47,3 +48,23 @@ if node "$root_dir/scripts/verify-resource-config.mjs" "$scratch/config.json"; t
   echo 'Expected unlimited CPU override to fail policy validation' >&2; exit 1
 fi
 echo 'Compose defaults, overrides and negative config checks PASS'
+# Fourth role is profile-only: no new mandatory credential/workspace env variables.
+render env COMPOSE_PROFILES=host-operator
+node "$root_dir/scripts/verify-resource-config.mjs" "$scratch/config.json"
+node --input-type=module - "$scratch/config.json" <<'JS'
+import fs from 'node:fs';import assert from 'node:assert/strict';
+const s=JSON.parse(fs.readFileSync(process.argv[2])).services['host-operator'];
+assert(s);assert.equal(Number(s.cpus),1);assert.equal(Number(s.mem_limit),2*1024**3);
+assert.equal(s.environment.AGENT_STATE_CAPACITY_BYTES,'536870912');assert(!s.depends_on);
+assert.equal(s.build.args.CODEX_VERSION,'0.163.0');assert.equal(s.build.args.CODEX_ACP_VERSION,'2.2.2');
+JS
+render env COMPOSE_PROFILES=host-operator HOST_OPERATOR_CPUS=1.5 HOST_OPERATOR_MEM_LIMIT=3g HOST_OPERATOR_STATE_BYTES=1073741824
+node "$root_dir/scripts/verify-resource-config.mjs" "$scratch/config.json"
+node --input-type=module - "$scratch/config.json" <<'JS'
+import fs from 'node:fs';import assert from 'node:assert/strict';const s=JSON.parse(fs.readFileSync(process.argv[2])).services['host-operator'];assert.equal(Number(s.cpus),1.5);assert.equal(Number(s.mem_limit),3*1024**3);assert.equal(s.environment.AGENT_STATE_CAPACITY_BYTES,'1073741824');
+JS
+render env COMPOSE_PROFILES=host-operator HOST_OPERATOR_CPUS=0
+if node "$root_dir/scripts/verify-resource-config.mjs" "$scratch/config.json"; then
+  echo 'Expected unlimited fourth CPU override to fail' >&2; exit 1
+fi
+echo 'Disconnected fourth profile defaults, overrides and negatives PASS'
