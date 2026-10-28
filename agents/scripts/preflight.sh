@@ -2,6 +2,13 @@
 set -euo pipefail
 
 root_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+selected_host=false
+if [[ "${1:-}" == --agent ]]; then
+  [[ "${2:-}" == host-operator && $# -ge 2 && $# -le 3 ]] || { echo 'invalid explicit agent selector' >&2; exit 1; }
+  selected_host=true; shift 2
+elif [[ "${1:-}" == -* || $# -gt 1 ]]; then echo 'invalid provisioning arguments' >&2; exit 1
+fi
+readonly selected_host
 env_file="${1:-${root_dir}/.env}"
 
 if (( EUID == 0 )) && [[ -n "${SUDO_USER:-}" && "${SUDO_USER}" != root ]]; then
@@ -22,6 +29,40 @@ set -a
 # shellcheck disable=SC1090
 source "${env_file}"
 set +a
+
+if [[ "$selected_host" == true ]]; then
+  (( EUID == 0 )) || { echo 'selected preflight requires trusted host root' >&2; exit 1; }
+  : "${AGENT_RUNTIME_ROOT:?AGENT_RUNTIME_ROOT required}"
+  : "${HOST_OPERATOR_GIT_IDENTITY_MANIFEST:?fourth public Git manifest required}"
+  : "${AGENT_GIT_IDENTITY_MANIFEST:?legacy public Git manifest required}"
+  node "$root_dir/docker/git-identity.mjs" validate-host-layout "$AGENT_RUNTIME_ROOT"
+  node "$root_dir/docker/git-identity.mjs" check-host "$HOST_OPERATOR_GIT_IDENTITY_MANIFEST" "$AGENT_GIT_IDENTITY_MANIFEST" "$AGENT_RUNTIME_ROOT/host-operator/credentials"
+  node "$root_dir/scripts/state-storage.mjs" --agent host-operator check "$AGENT_RUNTIME_ROOT" "${HOST_OPERATOR_STATE_BYTES:-536870912}"
+  node --input-type=module - "$root_dir" "$AGENT_RUNTIME_ROOT" <<'HOST_PREFLIGHT'
+import fs from 'node:fs';import {pathToFileURL}from'node:url';
+const [source,root]=process.argv.slice(2);
+const {validateHostBuzzKeys}=await import(pathToFileURL(source+'/docker/git-identity.mjs'));
+const {validateRecoveryDirectory}=await import(pathToFileURL(source+'/docker/host-operator-entrypoint.mjs'));
+const bad=()=>{throw Error('fourth metadata validation failed');};
+validateHostBuzzKeys(process.env.BUZZ_AGENT_OWNER_HEX,process.env.HOST_OPERATOR_EXISTING_BUZZ_PUBKEYS,process.env.HOST_OPERATOR_BUZZ_PUBKEY);
+if(!/^[A-Za-z0-9_-]{1,128}$/.test(process.env.HOST_OPERATOR_KANEO_USER_ID??'') || !process.env.KANEO_API_URL || !process.env.BUZZ_RELAY_URL)bad();
+const home=root+'/state-storage/host-operator',credentials=root+'/host-operator/credentials';
+const allowed=['gitconfig','buzz-private-key','buzz-auth-tag','kaneo-credentials.json','codex-auth.json','openai-api-key'];
+const names=fs.readdirSync(credentials);
+if(names.some(n=>!allowed.includes(n)) || ['gitconfig','buzz-private-key','buzz-auth-tag','kaneo-credentials.json'].some(n=>!names.includes(n)) || !names.some(n=>['codex-auth.json','openai-api-key'].includes(n)))bad();
+for(const n of names){const st=fs.lstatSync(credentials+'/'+n);if(!st.isFile()||st.isSymbolicLink()||st.nlink!==1||st.uid!==10001||st.gid!==10001||(st.mode&0o7777)!==0o600||!st.size)bad();}
+const homeNames=['lost+found','.agent','.cache','.config','.codex','.local','.npm','.gitconfig'];
+for(const n of fs.readdirSync(home)){
+ if(!homeNames.includes(n))bad();const file=home+'/'+n,st=fs.lstatSync(file);
+ if(n==='lost+found'){validateRecoveryDirectory(st);if(fs.readdirSync(file).length)bad();}
+ else if(st.isSymbolicLink()||st.uid!==10001||st.gid!==10001||(st.mode&0o7777)!==(st.isDirectory()?0o700:0o600)||(!st.isDirectory() && (n!=='.gitconfig'||!st.isFile()||st.nlink!==1)))bad();
+}
+const compose=fs.readFileSync(source+'/compose.yaml','utf8').split('  host-operator:')[1];
+if(!compose || !/target: \/workspace\n\s+read_only: true/.test(compose))bad();
+HOST_PREFLIGHT
+  echo 'Fourth-only preflight PASS; no network/actor/model acceptance implied.'
+  exit 0
+fi
 
 : "${GITHUB_GATEWAY_ALLOWED_OWNERS:=${AGENT_WORKSPACE_ORGANIZATION:-}}"
 : "${DISPATCHER_PROVIDER:=claude}"

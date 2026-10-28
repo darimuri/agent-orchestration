@@ -264,3 +264,21 @@ independent fourth identity/state acceptance. Production guard requires an actua
 bounded ext4 HOME and exact RO mounts. The source smoke's injected statfs/mount fixture
 is explicitly synthetic and cannot establish this operational gate. No tmpfs or
 unbounded fallback is allowed in the fourth production startup path.
+
+## F2 selected storage
+
+`sudo node agents/scripts/state-storage.mjs --agent host-operator prepare|check|unmount
+<runtime-root> [bytes]` selects only `state-storage/host-operator.img` and its exact
+mount; default capacity536870912. The original API, three roles/default sizes and
+unselected CLI remain unchanged. The same root-owned private store, exclusive storage
+lock, full preallocation, .creating conflict preservation, loop identity and
+nosuid/nodev/ext4/capacity checks apply. No formatting/resizing of an existing image,
+other-role unmount, fstab or service change is implicit. Stop the fourth first.
+
+A normal ext4 root can contain literal `lost+found`. Fourth startup permits only a
+real root:root0700 directory with expected link count, never a symlink or agent-owned
+impostor. Root selected storage/preflight verifies it is empty; recovery contents
+require filesystem investigation. No code chowns, deletes or treats it as user config.
+All other foreign HOME-root entries remain denied. Actual new-ext4 startup must be
+validated with `test-host-operator-provisioning.sh` on an explicitly approved disposable
+root/Docker host; pure helper fixtures do not prove mounted filesystem acceptance.

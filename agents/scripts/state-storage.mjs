@@ -4,6 +4,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { safePath } from '../docker/git-identity.mjs';
+import { validateRecoveryDirectory } from '../docker/host-operator-entrypoint.mjs';
 import { validateStateStorage } from '../docker/check-state-storage.mjs';
 
 export const roles = ['dispatcher-planner', 'developer-a', 'reviewer-a'];
@@ -25,6 +27,11 @@ export function plan(root, sizes = defaults) {
     validateStateStorage({ type: 0xef53n, bsize: 4096n, blocks: /^[1-9][0-9]*$/.test(bytes) ? BigInt(bytes) / 4096n : 0n }, bytes);
     return { role, bytes: Number(bytes), image: `${root}/state-storage/${role}.img`, target: `${root}/state-storage/${role}` };
   });
+}
+export function planHost(root, bytes = '536870912') {
+  // Reuse all legacy root/capacity checks without changing its roles/defaults/API.
+  const template=plan(root,[bytes,bytes,bytes])[0];
+  return [{...template,role:'host-operator',image:root+'/state-storage/host-operator.img',target:root+'/state-storage/host-operator'}];
 }
 function run(command, args, allowed = [0]) {
   const result = spawnSync(command, args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
@@ -61,11 +68,29 @@ function verify(p) {
   const stat = fs.lstatSync(p.target);
   if (!stat.isDirectory() || stat.isSymbolicLink() || stat.uid !== 10001 || stat.gid !== 10001 || (stat.mode & 0o777) !== 0o700) fail();
   validateStateStorage(fs.statfsSync(p.target, { bigint: true }), String(p.bytes));
+  if(p.role==='host-operator' && exists(p.target+'/lost+found')) {
+    validateRecoveryDirectory(fs.lstatSync(p.target+'/lost+found'));
+    if(fs.readdirSync(p.target+'/lost+found').length)fail();
+  }
   console.log(`${p.role}: bounded persistent ext4 PASS (${p.bytes} bytes backing image)`);
 }
-export function storage(action, root, sizes = defaults) {
+function requireStoppedHost(p) {
+  const file=p.target+'/.local/state/host-operator/instance.lock';
+  safePath(file);
+  if(!exists(file))return;
+  // Cooperative same-HOME check, not a host-global admission lease. Owner must
+  // keep the fourth stopped throughout maintenance; never unlink this lock.
+  const fd=fs.openSync(file,fs.constants.O_RDONLY|fs.constants.O_NOFOLLOW);
+  try {
+    const st=fs.fstatSync(fd),entry=fs.lstatSync(file);
+    if(!st.isFile()||st.nlink!==1||st.uid!==10001||st.gid!==10001||(st.mode&0o7777)!==0o600||st.ino!==entry.ino||st.dev!==entry.dev)fail();
+    const result=spawnSync('/usr/bin/flock',['-n','3'],{stdio:['ignore','pipe','pipe',fd]});
+    if(result.error||result.status!==0)fail();
+  }finally{fs.closeSync(fd);}
+}
+export function storage(action, root, sizes = defaults, selectedHost = false) {
   if (!['prepare', 'check', 'unmount'].includes(action) || process.platform !== 'linux' || process.getuid() !== 0) fail();
-  const plans = plan(root, sizes);
+  const plans = selectedHost ? planHost(root,sizes[0]) : plan(root, sizes);
   if (!fs.statSync(root).isDirectory()) fail();
   const store = `${root}/state-storage`;
   if (action === 'prepare' && !exists(store)) fs.mkdirSync(store, { mode: 0o700 });
@@ -76,6 +101,7 @@ export function storage(action, root, sizes = defaults) {
   try {
     // Check every existing object before any allocation/mount; never format/resize an existing image.
     for (const p of plans) {
+      if(selectedHost)requireStoppedHost(p);
       if (exists(p.image)) imageCheck(p);
       if (exists(p.target)) {
         const stat = fs.lstatSync(p.target);
@@ -126,6 +152,15 @@ export function storage(action, root, sizes = defaults) {
   }
 }
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  try { storage(process.argv[2], process.argv[3], process.argv.length === 4 ? defaults : process.argv.slice(4)); }
+  try {
+    const args=process.argv.slice(2);
+    if(args[0]==='--agent') {
+      if(args[1]!=='host-operator' || args.length<4 || args.length>5)fail();
+      storage(args[2],args[3],[args[4]??'536870912'],true);
+    } else {
+      if(args.some(a=>a.startsWith('--')))fail();
+      storage(args[0],args[1],args.length===2?defaults:args.slice(2));
+    }
+  }
   catch { console.error('state-storage: blocked; check host privileges, canonical paths, private ownership, image size/allocation and exact loop mounts; existing data was not reformatted'); process.exitCode = 1; }
 }

@@ -142,10 +142,87 @@ export function applyIdentity(source, destination, role, owner = runtimeOwner) {
   atomicWrite(destination, content, owner);
 }
 
+
+// Selected fourth-role provisioning is deliberately separate from the legacy three.
+export function validateHostManifest(value, legacy) {
+  const old=validateManifest(legacy);
+  if(!exactKeys(value,['identities']) || !Array.isArray(value.identities) || value.identities.length!==1)fail('one fourth identity required');
+  const record=value.identities[0];validateRecord(record,true);
+  if(record.agentId!=='host-operator' || old.some(r=>r.name.toLowerCase()===record.name.toLowerCase() || r.email.toLowerCase()===record.email.toLowerCase()))fail('fourth identity must be distinct');
+  return record;
+}
+export function loadHostManifest(file, legacyFile) {
+  regular(file);regular(legacyFile);
+  return validateHostManifest(JSON.parse(fs.readFileSync(file,'utf8')),JSON.parse(fs.readFileSync(legacyFile,'utf8')));
+}
+export function checkHostInstall(record, dir, owner=runtimeOwner, installed=false) {
+  safePath(dir);
+  const stat=(()=>{try{return fs.lstatSync(dir);}catch(e){if(e.code==='ENOENT')return null;throw e;}})();
+  if(stat) {
+    privateDirectory(dir,owner);
+    const allowed=['gitconfig','buzz-private-key','buzz-auth-tag','kaneo-credentials.json','codex-auth.json','openai-api-key'];
+    for(const name of fs.readdirSync(dir)) { if(!allowed.includes(name))fail('foreign fourth credential');privateFile(path.join(dir,name),owner); }
+  }
+  const file=path.join(dir,'gitconfig');
+  if(regular(file,true) && fs.readFileSync(file,'utf8')!==render(record))fail('fourth identity conflict; preserve existing file');
+  if(installed){privateDirectory(dir,owner);privateFile(file,owner);}
+}
+export function installHostIdentity(record,dir,owner=runtimeOwner) {
+  checkHostInstall(record,dir,owner);
+  if(!fs.existsSync(dir)){fs.mkdirSync(dir,{mode:0o700});fs.chownSync(dir,owner.uid,owner.gid);}
+  atomicWrite(path.join(dir,'gitconfig'),render(record),owner);
+}
+export function validateHostBuzzKeys(ownerKey, roster, expected, candidate=expected) {
+  const keys=typeof roster==='string'?roster.split(','):[];
+  if(!/^[a-f0-9]{64}$/.test(ownerKey??'') || keys.length!==3 || keys.some(k=>!/^[a-f0-9]{64}$/.test(k)) || new Set(keys).size!==3 || keys.includes(ownerKey) ||
+      !/^[a-f0-9]{64}$/.test(expected??'') || !/^[a-f0-9]{64}$/.test(candidate??'') || candidate!==expected || [ownerKey,...keys].includes(candidate))fail('invalid or shared fourth public identity');
+  return true;
+}
+export function validateHostLayout(root,env=process.env) {
+  if(typeof root!=='string' || !/^\/[A-Za-z0-9_./-]+$/.test(root) || root.split('/').length<4)fail('unsafe fourth root');
+  safePath(root);
+  const repository=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'../..');
+  for(const p of ['/etc','/usr','/dev','/proc','/sys','/run','/var','/workspace',repository])if(root===p || root.startsWith(p+'/') || p.startsWith(root+'/'))fail('protected fourth root');
+  if(root===env.HOME)fail('fourth root cannot replace HOME');
+  const paths={root,base:root+'/host-operator',credentials:root+'/host-operator/credentials',workspace:root+'/host-operator/workspace',home:root+'/state-storage/host-operator'};
+  for(const p of Object.values(paths))safePath(p);
+  for(const key of ['DISPATCHER_CREDENTIALS_DIR','DEVELOPER_CREDENTIALS_DIR','REVIEWER_CREDENTIALS_DIR','DISPATCHER_WORKSPACE','DEVELOPER_WORKSPACE','REVIEWER_WORKSPACE','GITHUB_GATEWAY_RUNTIME_DIR','GITHUB_GATEWAY_CREDENTIALS_ROOT']) {
+    const p=env[key];if(!p)continue;safePath(p);
+    if([paths.base,paths.home,paths.home+'.img'].some(h=>p===h || p.startsWith(h+'/') || h.startsWith(p+'/')))fail('fourth paths overlap existing role');
+  }
+  for(let p=root;p!=='/';p=path.dirname(p)) {
+    let st;try{st=fs.lstatSync(p);}catch(e){if(e.code==='ENOENT')continue;throw e;}
+    if(!st.isDirectory() || st.isSymbolicLink() || ![0,10001,process.getuid(),...(process.getuid()===0 && /^[0-9]+$/.test(env.SUDO_UID??'')?[Number(env.SUDO_UID)]:[])].includes(st.uid) || ((st.mode&0o022) && !(p==='/tmp'&&(st.mode&0o1000))))fail('unsafe fourth parent');
+  }
+  for(const [p,mode]of[[paths.base,0o755],[paths.credentials,0o700],[paths.workspace,0o755]]) {
+    try{const st=fs.lstatSync(p);if(!st.isDirectory()||st.uid!==10001||st.gid!==10001||(st.mode&0o7777)!==mode)fail('existing fourth layout conflict');}catch(e){if(e.code!=='ENOENT')throw e;}
+  }
+  if(fs.existsSync(paths.base) && fs.readdirSync(paths.base).some(n=>!['credentials','workspace'].includes(n)))fail('foreign fourth layout entry');
+  return paths;
+}
+export function prepareHostLayout(root,env=process.env) {
+  const paths=validateHostLayout(root,env);
+  if(process.getuid()!==0)fail('fourth layout preparation requires trusted host root');
+  if(!fs.existsSync(root))fs.mkdirSync(root,{mode:0o755});
+  for(const [p,mode]of[[paths.base,0o755],[paths.credentials,0o700],[paths.workspace,0o755]])if(!fs.existsSync(p)){fs.mkdirSync(p,{mode});fs.chownSync(p,10001,10001);}
+  return paths;
+}
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   try {
     const [command, input, ...args] = process.argv.slice(2);
-    if (command === 'apply') {
+    if (['validate-host','check-install-host','install-host','check-host'].includes(command)) {
+      const [legacy,dir,...extra]=args;if(extra.length || (command==='validate-host'?args.length!==1:args.length!==2))fail('invalid fourth identity arguments');
+      const record=loadHostManifest(input,legacy);
+      if(command==='validate-host'){/* public mapping validation only */}
+      else if(command==='install-host')installHostIdentity(record,dir);
+      else checkHostInstall(record,dir,runtimeOwner,command==='check-host');
+    } else if (['validate-host-layout','prepare-host-layout'].includes(command)) {
+      if(args.length)fail('invalid fourth layout arguments');
+      if(command==='prepare-host-layout')prepareHostLayout(input);else validateHostLayout(input);
+     } else if(command==='validate-host-buzz') {
+      if(args.length!==3)fail('public Buzz validation requires owner/roster/expected/candidate');
+      validateHostBuzzKeys(input,...args);
+    } else if (command === 'apply') {
       if (args.length !== 2) fail('apply requires source, destination, role');
       applyIdentity(input, ...args);
     } else {

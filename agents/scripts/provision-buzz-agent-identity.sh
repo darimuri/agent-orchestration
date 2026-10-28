@@ -15,14 +15,21 @@ Usage: provision-buzz-agent-identity.sh [--verify-only] [agent ...]
 
 Agents: dispatcher-planner developer-a reviewer-a
 With no agent arguments, provisions all three identities.
+Fourth only: --agent host-operator (cannot be mixed with agent arguments).
 EOF
 }
 
 verify_only=false
 requested_agents=()
+selected_host=false
 while (($# > 0)); do
   case "$1" in
+    --agent)
+      [[ "$selected_host" == false && "${2:-}" == host-operator ]] || die 'invalid explicit fourth selector'
+      selected_host=true; shift
+      ;;
     --verify-only)
+      [[ "$verify_only" == false ]] || die 'repeated verify-only'
       verify_only=true
       ;;
     -h|--help)
@@ -43,7 +50,9 @@ while (($# > 0)); do
   esac
   shift
 done
+readonly selected_host
 
+if [[ "$selected_host" == true && ${#requested_agents[@]} -gt 0 ]] || [[ "$selected_host" == false && " ${requested_agents[*]} " == *' host-operator '* ]]; then die 'fourth must be selected alone with --agent host-operator'; fi
 if ((EUID == 0)); then
   die "run as the host user, not root"
 fi
@@ -69,6 +78,9 @@ required_variables=(
   DEVELOPER_CREDENTIALS_DIR
   REVIEWER_CREDENTIALS_DIR
 )
+if [[ "$selected_host" == true ]]; then
+  required_variables=(BUZZ_RELAY_URL BUZZ_AGENT_OWNER_HEX AGENT_RUNTIME_ROOT HOST_OPERATOR_EXISTING_BUZZ_PUBKEYS HOST_OPERATOR_BUZZ_PUBKEY)
+fi
 for variable_name in "${required_variables[@]}"; do
   [[ -n "${!variable_name:-}" ]] \
     || die "missing required variable in ${env_file}: ${variable_name}"
@@ -86,10 +98,15 @@ done
 [[ "${AGENT_RUNTIME_UID}" =~ ^[0-9]+$ && "${AGENT_RUNTIME_GID}" =~ ^[0-9]+$ ]] \
   || die "AGENT_RUNTIME_UID and AGENT_RUNTIME_GID must be numeric"
 
+if [[ "$selected_host" == true ]]; then
+  [[ "$AGENT_RUNTIME_UID:$AGENT_RUNTIME_GID" == 10001:10001 ]] || die 'fixed fourth UID required'
+  node "$root_dir/docker/git-identity.mjs" validate-host-layout "$AGENT_RUNTIME_ROOT"
+  node "$root_dir/docker/git-identity.mjs" validate-host-buzz "$BUZZ_AGENT_OWNER_HEX" "$HOST_OPERATOR_EXISTING_BUZZ_PUBKEYS" "$HOST_OPERATOR_BUZZ_PUBKEY" "$HOST_OPERATOR_BUZZ_PUBKEY"
+fi
 declare -A credentials_dirs=(
-  [dispatcher-planner]="${DISPATCHER_CREDENTIALS_DIR}"
-  [developer-a]="${DEVELOPER_CREDENTIALS_DIR}"
-  [reviewer-a]="${REVIEWER_CREDENTIALS_DIR}"
+  [dispatcher-planner]="${DISPATCHER_CREDENTIALS_DIR:-}"
+  [developer-a]="${DEVELOPER_CREDENTIALS_DIR:-}"
+  [reviewer-a]="${REVIEWER_CREDENTIALS_DIR:-}"
 )
 declare -A profile_names=(
   [dispatcher-planner]='Dispatcher Planner'
@@ -102,6 +119,12 @@ declare -A profile_about=(
   [reviewer-a]='Darimuri development workflow review agent'
 )
 
+if [[ "$selected_host" == true ]]; then
+  credentials_dirs[host-operator]="$AGENT_RUNTIME_ROOT/host-operator/credentials"
+  profile_names[host-operator]='Host Operator'
+  profile_about[host-operator]='Disconnected owner-directed Host Operator'
+  requested_agents=(host-operator)
+fi
 if ((${#requested_agents[@]} == 0)); then
   requested_agents=(dispatcher-planner developer-a reviewer-a)
 fi
@@ -244,10 +267,25 @@ provision_identity() {
   local pubkey
   local policy_content
 
+  if [[ "$selected_host" == true ]]; then
+    docker run --rm --user 0:0 --mount "type=bind,src=$credentials_dir,dst=/run/agent/credentials,readonly" --entrypoint sh "$AGENT_BUZZ_SPRIG_IMAGE" -ec '
+      test ! -L /run/agent/credentials
+      test "$(stat -c %u:%g:%a /run/agent/credentials)" = 10001:10001:700
+      for f in /run/agent/credentials/* /run/agent/credentials/.[!.]* /run/agent/credentials/..?*; do
+        if ! test -e "$f" && ! test -L "$f"; then continue; fi
+        case "${f##*/}" in gitconfig|buzz-private-key|buzz-auth-tag|kaneo-credentials.json|codex-auth.json|openai-api-key) ;; *) exit 1;; esac
+        test -f "$f" && test ! -L "$f"
+        test "$(stat -c %u:%g:%a:%h "$f")" = 10001:10001:600:1
+      done
+    ' || die 'unsafe fourth credential layout'
+  fi
   credential_file_exists "${credentials_dir}" buzz-private-key \
     || die "${agent} is missing ${key_file}"
   pubkey="$(derive_agent_pubkey "${key_file}")"
 
+  if [[ "$selected_host" == true ]]; then
+    node "$root_dir/docker/git-identity.mjs" validate-host-buzz "$BUZZ_AGENT_OWNER_HEX" "$HOST_OPERATOR_EXISTING_BUZZ_PUBKEYS" "$HOST_OPERATOR_BUZZ_PUBKEY" "$pubkey"
+  fi
   if [[ "${verify_only}" == false ]]; then
     docker run --rm \
       --user "$(id -u):$(id -g)" \

@@ -54,3 +54,13 @@ test('launcher crash leaves lock held by live descendant until its termination',
 });
 
 test('persisted temporary config link and inherited provider/profile overrides are refused',t=>{const f=fixture(t);for(const key of ['CODEX_CONFIG','XDG_STATE_HOME','OPENAI_BASE_URL','BASH_FUNC_injected%%']){f.env[key]='sentinel';assert.throws(()=>validateHostOperator(f));delete f.env[key];}fs.mkdirSync(f.paths.home+'/.codex',{mode:0o700});fs.symlinkSync(f.root+'/target',f.paths.home+'/.codex/config.toml.tmp');assert.throws(()=>validateHostOperator(f));assert(!fs.existsSync(f.root+'/target'));});
+
+test('ext4 lost+found accepts only root-owned private recovery metadata',async()=>{
+ const{validateRecoveryDirectory}=await import('./host-operator-entrypoint.mjs');
+ const stat={isDirectory:()=>true,isSymbolicLink:()=>false,uid:0,gid:0,mode:0o40700,nlink:2};
+ assert.doesNotThrow(()=>validateRecoveryDirectory(stat));
+ for(const change of [{uid:10001},{gid:10001},{mode:0o40755},{nlink:3},{isDirectory:()=>false},{isSymbolicLink:()=>true}])assert.throws(()=>validateRecoveryDirectory({...stat,...change}));
+});
+test('agent-owned lost+found impostor is preserved and denied; unrelated foreign HOME still denied',t=>{
+ const f=fixture(t);fs.mkdirSync(f.paths.home+'/lost+found',{mode:0o700});if(identity.uid===0)fs.chownSync(f.paths.home+'/lost+found',10001,10001);assert.throws(()=>validateHostOperator(f));assert(fs.existsSync(f.paths.home+'/lost+found'));fs.rmdirSync(f.paths.home+'/lost+found');fs.mkdirSync(f.paths.home+'/foreign',{mode:0o700});assert.throws(()=>validateHostOperator(f));
+});

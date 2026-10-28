@@ -6,6 +6,13 @@ repository_root="$(cd "${root_dir}/.." && pwd)"
 # Shared independent-clone flow; the manual fallback retains its host-only scope.
 source "${root_dir}/scripts/repository-clone.sh"
 host_home="${HOME}"
+selected_host=false
+if [[ "${1:-}" == --agent ]]; then
+  [[ "${2:-}" == host-operator && $# -ge 3 && $# -le 5 ]] || { echo 'invalid explicit agent selector' >&2; exit 1; }
+  selected_host=true; shift 2
+elif [[ "${1:-}" == -* || $# -gt 3 ]]; then echo 'invalid repository arguments' >&2; exit 1
+fi
+readonly selected_host
 repository="${1:-}"
 requested_ref="${2:-}"
 env_file="${3:-${root_dir}/.env}"
@@ -38,6 +45,12 @@ required_variables=(
   DEVELOPER_WORKSPACE
   REVIEWER_WORKSPACE
 )
+if [[ "$selected_host" == true ]]; then
+  required_variables=(AGENT_WORKSPACE_ORGANIZATION AGENT_WORKSPACE_GIT_URL_TEMPLATE AGENT_RUNTIME_ROOT)
+  node "$root_dir/docker/git-identity.mjs" validate-host-layout "$AGENT_RUNTIME_ROOT"
+  HOST_OPERATOR_WORKSPACE="$AGENT_RUNTIME_ROOT/host-operator/workspace"
+  [[ -d "$HOST_OPERATOR_WORKSPACE" ]] || die 'prepare selected runtime before repository provisioning'
+fi
 for variable_name in "${required_variables[@]}"; do
   [[ -n "${!variable_name:-}" ]] \
     || die "missing required variable in ${env_file}: ${variable_name}"
@@ -80,13 +93,15 @@ canonicalize_workspace_path() {
 }
 
 canonicalize_workspace_path AGENT_RUNTIME_ROOT
-for variable_name in DISPATCHER_WORKSPACE DEVELOPER_WORKSPACE REVIEWER_WORKSPACE; do
+selected_workspace_names=(DISPATCHER_WORKSPACE DEVELOPER_WORKSPACE REVIEWER_WORKSPACE)
+if [[ "$selected_host" == true ]]; then selected_workspace_names=(HOST_OPERATOR_WORKSPACE); fi
+for variable_name in "${selected_workspace_names[@]}"; do
   canonicalize_workspace_path "${variable_name}"
   [[ "${!variable_name}" == "${AGENT_RUNTIME_ROOT}/"* ]] \
     || die "${variable_name} must be below AGENT_RUNTIME_ROOT: ${!variable_name}"
 done
 
-workspace_names=(DISPATCHER_WORKSPACE DEVELOPER_WORKSPACE REVIEWER_WORKSPACE)
+workspace_names=("${selected_workspace_names[@]}")
 for ((left_index = 0; left_index < ${#workspace_names[@]}; left_index++)); do
   for ((right_index = left_index + 1; right_index < ${#workspace_names[@]}; right_index++)); do
     left_name="${workspace_names[${left_index}]}"
@@ -136,8 +151,12 @@ provision_clone() {
   local staging="${temporary_dir}/${agent_name}"
   local origin
 
-  as_root install -d -m 0755 -o "${agent_uid}" -g "${agent_uid}" \
-    "${workspace_root}/${owner}"
+  if [[ "$selected_host" == true ]]; then
+    as_root "$(command -v node)" --input-type=module - "$root_dir" "$workspace_root" "$owner" "$repository_name" <<'CHECK_DEST'
+import fs from'node:fs';import{pathToFileURL}from'node:url';const[source,root,owner,repo]=process.argv.slice(2);const{safePath}=await import(pathToFileURL(source+'/docker/git-identity.mjs'));for(const file of [root,root+'/'+owner,root+'/'+owner+'/'+repo]){safePath(file);try{const st=fs.lstatSync(file);if(!st.isDirectory()||st.uid!==10001||st.gid!==10001||(st.mode&0o022))throw Error('unsafe selected clone');}catch(e){if(e.code!=='ENOENT')throw e;}}
+CHECK_DEST
+  fi
+  as_root install -d -m 0755 -o "${agent_uid}" -g "${agent_uid}" "${workspace_root}/${owner}"
 
   if as_root test -e "${destination}"; then
     as_root test -d "${destination}/.git" \
@@ -145,6 +164,12 @@ provision_clone() {
     origin="$(as_root git -c safe.directory="${destination}" -C "${destination}" remote get-url origin)"
     [[ "${origin}" == "${repository_url}" ]] \
       || die "${agent_name} repository origin is ${origin}, expected ${repository_url}"
+    if [[ "$selected_host" == true ]]; then
+      as_root test ! -e "$destination/.git/objects/info/alternates" || die 'selected clone has alternates'
+      as_root test ! -L "$destination/.git" || die 'selected clone is linked'
+      [[ -z "$(as_root find "$destination/.git" -type l -print -quit)" ]] || die 'selected Git metadata contains links'
+      [[ -z "$(as_root find "$destination/.git" -type f -links +1 -print -quit)" ]] || die 'selected clone shares objects'
+    fi
     printf 'Preserving %s clone: %s\n' "${agent_name}" "${destination}"
     return
   fi
@@ -156,6 +181,11 @@ provision_clone() {
   printf 'Provisioned %s clone: %s\n' "${agent_name}" "${destination}"
 }
 
+if [[ "$selected_host" == true ]]; then
+  provision_clone host-operator "$HOST_OPERATOR_WORKSPACE"
+  echo 'Fourth independent clone prepared; container workspace stays read-only.'
+  exit 0
+fi
 provision_clone dispatcher-planner "${DISPATCHER_WORKSPACE}"
 provision_clone developer-a "${DEVELOPER_WORKSPACE}"
 provision_clone reviewer-a "${REVIEWER_WORKSPACE}"

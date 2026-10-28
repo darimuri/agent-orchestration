@@ -234,3 +234,33 @@ test('fourth persona is apply-only; legacy manifest and persona order stay exact
   fs.writeFileSync(source,render(records[0]));assert.throws(()=>applyIdentity(source,destination,'host-operator'));
   assert.equal(fs.readFileSync(destination,'utf8'),render(record));
 });
+
+test('separate fourth manifest rejects shared/corrupt records and preserves legacy defaults',async t=>{
+ const{validateHostManifest,loadHostManifest,installHostIdentity,checkHostInstall}=await import('./git-identity.mjs');
+ const{root,records}=setup(t),legacy=fixture(),record={agentId:'host-operator',name:'Fixture Host Operator',email:'host@example.test'},value={identities:[record]};
+ assert.deepEqual(validateHostManifest(value,legacy),record);
+ for(const bad of [{identities:[]},{identities:[record,record]},{identities:[{...record,agentId:'developer-a'}]},{identities:[{...record,name:records[0].name.toUpperCase()}]},{identities:[{...record,email:records[1].email.toUpperCase()}]},{identities:[{...record,extra:true}]}])assert.throws(()=>validateHostManifest(bad,legacy));
+ const file=root+'/host.json';fs.writeFileSync(file,JSON.stringify(value));assert.deepEqual(loadHostManifest(file,example),record);
+ const dir=root+'/selected';installHostIdentity(record,dir,fixtureOwner);checkHostInstall(record,dir,fixtureOwner,true);const ino=fs.statSync(dir).ino;installHostIdentity(record,dir,fixtureOwner);assert.equal(fs.statSync(dir).ino,ino);
+ fs.writeFileSync(dir+'/gh-token','sentinel',{mode:0o600});assert.throws(()=>installHostIdentity(record,dir,fixtureOwner));assert.equal(fs.readFileSync(dir+'/gitconfig','utf8'),render(record));
+});
+test('fourth public Buzz mapping rejects copied/owner/unknown/malformed identities',async()=>{
+ const{validateHostBuzzKeys}=await import('./git-identity.mjs');const owner='a'.repeat(64),keys=['1','2','3'].map(n=>n.repeat(64)).join(','),fourth='4'.repeat(64);
+ assert(validateHostBuzzKeys(owner,keys,fourth));
+ for(const args of [[owner,keys,owner],[owner,keys,'1'.repeat(64)],[owner,keys,fourth,'5'.repeat(64)],[owner,keys.split(',').slice(1).join(','),fourth],[owner,keys.replace('2'.repeat(64),'1'.repeat(64)),fourth],[owner,keys,'nothex']])assert.throws(()=>validateHostBuzzKeys(...args));
+});
+test('fourth layout validates paths without mutation and denies aliases/overlap/foreign metadata',async t=>{
+ const{validateHostLayout}=await import('./git-identity.mjs');const{root}=setup(t),runtime=root+'/runtime';const paths=validateHostLayout(runtime,{});assert.equal(paths.credentials,runtime+'/host-operator/credentials');assert(!fs.existsSync(runtime));
+ fs.symlinkSync(root,root+'/link');assert.throws(()=>validateHostLayout(root+'/link/runtime',{}));assert.throws(()=>validateHostLayout(runtime,{DEVELOPER_WORKSPACE:runtime+'/host-operator'}));assert.throws(()=>validateHostLayout('/workspace/runtime/test',{}));
+ fs.mkdirSync(runtime);fs.mkdirSync(runtime+'/host-operator',{mode:0o700});assert.throws(()=>validateHostLayout(runtime,{}));
+});
+
+test('explicit fourth selectors reject repeated/mixed/unknown input before writes or auth',t=>{
+ const{root}=setup(t);const missing=root+'/missing.env';
+ for(const script of ['provision-runtime.sh','provision-agent-repository.sh','preflight.sh','provision-kaneo-credential.sh']){
+  const file=path.join(here,'../scripts',script);
+  for(const args of [['--agent','developer-a',missing],['--agent','host-operator','--agent','host-operator',missing]]){
+   const result=run('/bin/bash',[file,...args],{env:{PATH:process.env.PATH,HOME:root}});assert.notEqual(result.status,0);assert(!fs.existsSync(root+'/host-operator'));
+  }
+ }
+});
