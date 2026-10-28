@@ -203,8 +203,8 @@ export function validateHostLayout(root,env=process.env) {
 export function prepareHostLayout(root,env=process.env) {
   const paths=validateHostLayout(root,env);
   if(process.getuid()!==0)fail('fourth layout preparation requires trusted host root');
-  if(!fs.existsSync(root))fs.mkdirSync(root,{mode:0o755});
-  for(const [p,mode]of[[paths.base,0o755],[paths.credentials,0o700],[paths.workspace,0o755]])if(!fs.existsSync(p)){fs.mkdirSync(p,{mode});fs.chownSync(p,10001,10001);}
+  if(!fs.existsSync(root)){fs.mkdirSync(root,{mode:0o700});fs.chmodSync(root,0o755);}
+  for(const [p,mode]of[[paths.base,0o755],[paths.credentials,0o700],[paths.workspace,0o755]])if(!fs.existsSync(p)){fs.mkdirSync(p,{mode:0o700});fs.chownSync(p,10001,10001);fs.chmodSync(p,mode);}
   return paths;
 }
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

@@ -264,3 +264,28 @@ test('explicit fourth selectors reject repeated/mixed/unknown input before write
   }
  }
 });
+
+test('synthetic root facade: umask0077 selected layout preparation is repeatable without repairing conflicts', t => {
+ const {root}=setup(t), runtime=root+'/runtime';
+ // Real filesystem/umask, synthetic root/chown only: no privileged host fixture.
+ const source=`
+ const fs=await import('node:fs'),vm=await import('node:vm'),path=await import('node:path'),url=await import('node:url');
+ const filename=process.argv[1],runtime=process.argv[2];process.umask(0o077);
+ const native=fs.default,base=runtime+'/host-operator',created=[];
+ const facade={...native,chownSync(p,uid,gid){if(uid!==10001||gid!==10001)throw Error('unexpected owner');created.push(p);},
+ lstatSync(p){const st=native.lstatSync(p);return p===base||p.startsWith(base+'/')?new Proxy(st,{get(o,k){return k==='uid'||k==='gid'?10001:Reflect.get(o,k);}}):st;}};
+ const context=vm.createContext({console,process:{getuid:()=>0,argv:[],env:{}}});
+ const imports={'node:fs':facade,'node:path':path.default,'node:url':url};
+ const mod=new vm.SourceTextModule(native.readFileSync(filename,'utf8'),{context,initializeImportMeta(meta){meta.url=url.pathToFileURL(filename).href;}});
+ await mod.link(async name=>{const value=imports[name];if(!value)throw Error('unexpected import');const keys=name==='node:fs'||name==='node:path'?['default']:Object.keys(value);const m=new vm.SyntheticModule(keys,function(){for(const k of keys)this.setExport(k,k==='default'?value:value[k]);},{context});return m;});await mod.evaluate();
+ const api=mod.namespace;api.prepareHostLayout(runtime,{});
+ for(const [p,mode]of[[runtime,0o755],[base,0o755],[base+'/credentials',0o700],[base+'/workspace',0o755]])if((native.statSync(p).mode&0o7777)!==mode)throw Error('umask changed requested mode');
+ const before=[base,base+'/credentials',base+'/workspace'].map(p=>native.statSync(p).ino);
+ api.prepareHostLayout(runtime,{});api.validateHostLayout(runtime,{});
+ if(created.length!==3||before.some((ino,i)=>ino!==native.statSync([base,base+'/credentials',base+'/workspace'][i]).ino))throw Error('repeat mutated existing layout');
+ native.chmodSync(base+'/workspace',0o700);let rejected=false;try{api.prepareHostLayout(runtime,{});}catch{rejected=true;}
+ if(!rejected||(native.statSync(base+'/workspace').mode&0o7777)!==0o700)throw Error('conflict repaired');
+ `;
+ const result=run(process.execPath,['--experimental-vm-modules','--input-type=module','-e',source,path.join(here,'git-identity.mjs'),runtime]);
+ assert.equal(result.status,0,result.stderr);
+});

@@ -40,7 +40,15 @@ EOF
 # No Gateway variables; default legacy invocation fails rather than touching fourth.
 if PROVISION_RUNTIME_TEST_MODE=1 bash "$root_dir/scripts/provision-runtime.sh" "$scratch/fixture.env" > "$scratch/default.log" 2>&1; then echo 'legacy default unexpectedly accepted missing Gateway' >&2;exit 1;fi
 [[ ! -e "$runtime/host-operator" ]]
-for i in 1 2; do PROVISION_RUNTIME_TEST_MODE=1 bash "$root_dir/scripts/provision-runtime.sh" --agent host-operator "$scratch/fixture.env";done
+# Repeated explicit provisioning under the fixture's umask0077 must preserve modes/inodes.
+for i in 1 2; do
+ PROVISION_RUNTIME_TEST_MODE=1 bash "$root_dir/scripts/provision-runtime.sh" --agent host-operator "$scratch/fixture.env"
+ [[ "$(stat -c %u:%g:%a "$runtime/host-operator")" == 10001:10001:755 ]]
+ [[ "$(stat -c %u:%g:%a "$runtime/host-operator/credentials")" == 10001:10001:700 ]]
+ [[ "$(stat -c %u:%g:%a "$runtime/host-operator/workspace")" == 10001:10001:755 ]]
+ layout_ids="$(stat -c %d:%i "$runtime/host-operator" "$runtime/host-operator/credentials" "$runtime/host-operator/workspace")"
+ if [[ "$i" == 1 ]]; then first_layout_ids="$layout_ids";else [[ "$layout_ids" == "$first_layout_ids" ]];fi
+done
 [[ ! -e "$runtime/host-operator/credentials/github-gateway-agent-token" ]]
 source_repo="$scratch/sources/fixture-org/example.git";mkdir -p "$source_repo"
 git -C "$source_repo" init -q --initial-branch=main
