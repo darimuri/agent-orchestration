@@ -4,7 +4,13 @@ set -euo pipefail
 umask 077
 (( EUID == 0 )) || { echo 'requires trusted disposable root host' >&2; exit 1; }
 [[ $# == 1 && "$1" != -* ]] || { echo 'supply isolated test Codex image tag/digest' >&2; exit 1; }
-for tool in docker node git flock findmnt losetup mkfs.ext4 fallocate mount umount; do command -v "$tool" >/dev/null || { echo 'host fixture prerequisite missing' >&2; exit 1; }; done
+for tool in docker node git flock findmnt losetup mkfs.ext4 fallocate mount umount sudo id stat; do command -v "$tool" >/dev/null || { echo 'host fixture prerequisite missing' >&2; exit 1; }; done
+# An isolated nonroot fixture account must have existing noninteractive sudo.
+: "${HOST_OPERATOR_TEST_HOST_USER:?supply disposable nonroot fixture account}"
+[[ "$HOST_OPERATOR_TEST_HOST_USER" =~ ^[a-z_][a-z0-9_-]*$ ]] || exit 1
+host_uid="$(id -u "$HOST_OPERATOR_TEST_HOST_USER")";host_gid="$(id -g "$HOST_OPERATOR_TEST_HOST_USER")"
+(( host_uid != 0 )) || { echo 'fixture host account must be nonroot' >&2;exit 1; }
+sudo -n -u "$HOST_OPERATOR_TEST_HOST_USER" sudo -n true
 root_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 scratch="$(mktemp -d /tmp/host-operator-provisioning.XXXXXXXX)"
 runtime="$scratch/runtime"; image="$1"; mounted=false
@@ -16,7 +22,8 @@ cleanup(){
  rm -rf "$scratch";exit "$code"
 }
 trap cleanup EXIT
-mkdir -p "$runtime" "$scratch/run";chmod 0755 "$runtime"
+mkdir -p "$runtime" "$scratch/run" "$scratch/host-home";chmod 0755 "$scratch" "$runtime"
+chown "$host_uid:$host_gid" "$scratch/run" "$scratch/host-home"
 cp "$root_dir/git-identities.example.json" "$scratch/legacy.json"
 cp "$root_dir/host-operator-git-identity.example.json" "$scratch/host.json"
 for role in dispatcher-planner developer-a reviewer-a github-gateway; do mkdir -p "$runtime/$role";echo 'old fixture sentinel' > "$runtime/$role/sentinel";done
@@ -36,7 +43,11 @@ HOST_OPERATOR_EXISTING_BUZZ_PUBKEYS=$(printf 1%.0s {1..64}),$(printf 2%.0s {1..6
 HOST_OPERATOR_BUZZ_PUBKEY=$(printf 4%.0s {1..64})
 HOST_OPERATOR_KANEO_USER_ID=fixture-host-actor
 HOST_OPERATOR_STATE_BYTES=67108864
+DEVELOPER_CREDENTIALS_DIR=$runtime/developer-a/private
+GITHUB_GATEWAY_CREDENTIALS_ROOT=$runtime/github-gateway/private
 EOF
+chmod 0644 "$scratch/fixture.env" "$scratch/legacy.json" "$scratch/host.json"
+as_host(){ sudo -n -u "$HOST_OPERATOR_TEST_HOST_USER" env -i PATH="$PATH" HOME="$scratch/host-home" bash "$@"; }
 # No Gateway variables; default legacy invocation fails rather than touching fourth.
 if PROVISION_RUNTIME_TEST_MODE=1 bash "$root_dir/scripts/provision-runtime.sh" "$scratch/fixture.env" > "$scratch/default.log" 2>&1; then echo 'legacy default unexpectedly accepted missing Gateway' >&2;exit 1;fi
 [[ ! -e "$runtime/host-operator" ]]
@@ -53,10 +64,32 @@ done
 source_repo="$scratch/sources/fixture-org/example.git";mkdir -p "$source_repo"
 git -C "$source_repo" init -q --initial-branch=main
 git -C "$source_repo" -c user.name=fixture -c user.email=fixture@example.test commit -q --allow-empty -m fixture
-for i in 1 2; do PROVISION_RUNTIME_TEST_MODE=1 bash "$root_dir/scripts/provision-agent-repository.sh" --agent host-operator fixture-org/example main "$scratch/fixture.env";done
-[[ ! -e "$runtime/developer-a/workspace" ]]
+# State-first ordering reproduces the private-store boundary from G3.
 node "$root_dir/scripts/state-storage.mjs" --agent host-operator prepare "$runtime" 67108864
 mounted=true
+[[ "$(stat -c %u:%g:%a "$runtime/state-storage")" == 0:0:700 ]]
+# Public offline source only; no credential or private state permissions changed.
+chown -R "$host_uid:$host_gid" "$scratch/sources"
+chmod -R a+rX "$scratch/sources"
+if as_host -c 'node "$1" validate-host-layout "$2"' fixture "$root_dir/docker/git-identity.mjs" "$runtime" > "$scratch/full-negative.log" 2>&1;then echo 'nonroot full validator unexpectedly traversed private state' >&2;exit 1;fi
+as_host -c 'node "$1" validate-host-repository-layout "$2"' fixture "$root_dir/docker/git-identity.mjs" "$runtime"
+state_snapshot(){
+ stat -c '%d:%i:%u:%g:%a:%s' "$runtime/state-storage" "$runtime/state-storage/host-operator.img" "$runtime/state-storage/host-operator"
+ findmnt -n -o SOURCE,FSTYPE,OPTIONS --target "$runtime/state-storage/host-operator"
+ find "$runtime/state-storage/host-operator" -xdev -printf '%P:%y:%i:%u:%g:%m:%s\n' | sort
+ find "$runtime/state-storage/host-operator" -xdev -type f -exec sha256sum {} + | sort
+}
+state_snapshot > "$scratch/state-before"
+for i in 1 2; do
+ as_host "$root_dir/scripts/provision-agent-repository.sh" --agent host-operator fixture-org/example main "$scratch/fixture.env"
+ dest="$runtime/host-operator/workspace/fixture-org/example"
+ clone_snapshot="$(stat -c %d:%i "$dest" "$dest/.git");$(git -c safe.directory="$dest" -C "$dest" rev-parse HEAD);$(git -c safe.directory="$dest" -C "$dest" remote get-url origin)"
+ if [[ "$i" == 1 ]];then first_clone_snapshot="$clone_snapshot";else [[ "$first_clone_snapshot" == "$clone_snapshot" ]];fi
+ [[ ! -e "$dest/.git/objects/info/alternates" ]]
+ [[ -z "$(find "$dest/.git" -type f -links +1 -print -quit)" ]]
+ state_snapshot > "$scratch/state-after";cmp "$scratch/state-before" "$scratch/state-after"
+done
+[[ ! -e "$runtime/developer-a/workspace" ]]
 home="$runtime/state-storage/host-operator";recovery="$home/lost+found"
 [[ "$(stat -c %u:%g:%a "$recovery")" == 0:0:700 ]]
 [[ -z "$(find "$recovery" -mindepth 1 -print -quit)" ]]

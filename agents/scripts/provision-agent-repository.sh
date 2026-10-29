@@ -47,7 +47,7 @@ required_variables=(
 )
 if [[ "$selected_host" == true ]]; then
   required_variables=(AGENT_WORKSPACE_ORGANIZATION AGENT_WORKSPACE_GIT_URL_TEMPLATE AGENT_RUNTIME_ROOT)
-  node "$root_dir/docker/git-identity.mjs" validate-host-layout "$AGENT_RUNTIME_ROOT"
+  node "$root_dir/docker/git-identity.mjs" validate-host-repository-layout "$AGENT_RUNTIME_ROOT"
   HOST_OPERATOR_WORKSPACE="$AGENT_RUNTIME_ROOT/host-operator/workspace"
   [[ -d "$HOST_OPERATOR_WORKSPACE" ]] || die 'prepare selected runtime before repository provisioning'
 fi

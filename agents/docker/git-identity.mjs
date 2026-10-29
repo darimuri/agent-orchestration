@@ -200,6 +200,31 @@ export function validateHostLayout(root,env=process.env) {
   if(fs.existsSync(paths.base) && fs.readdirSync(paths.base).some(n=>!['credentials','workspace'].includes(n)))fail('foreign fourth layout entry');
   return paths;
 }
+// Repository placement checks public paths only. Private HOME/image and legacy
+// boundaries participate lexically; state/preflight retain full traversal authority.
+export function validateHostRepositoryLayout(root,env=process.env) {
+  if(typeof root!=='string' || !/^\/[A-Za-z0-9_./-]+$/.test(root) || root.split('/').length<4)fail('unsafe fourth root');
+  safePath(root);
+  const repository=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'../..');
+  for(const p of ['/etc','/usr','/dev','/proc','/sys','/run','/var','/workspace',repository])if(root===p || root.startsWith(p+'/') || p.startsWith(root+'/'))fail('protected fourth root');
+  if(root===env.HOME)fail('fourth root cannot replace HOME');
+  const paths={root,base:root+'/host-operator',credentials:root+'/host-operator/credentials',workspace:root+'/host-operator/workspace',home:root+'/state-storage/host-operator'};
+  for(const p of [paths.root,paths.base,paths.credentials,paths.workspace])safePath(p);
+  for(const key of ['DISPATCHER_CREDENTIALS_DIR','DEVELOPER_CREDENTIALS_DIR','REVIEWER_CREDENTIALS_DIR','DISPATCHER_WORKSPACE','DEVELOPER_WORKSPACE','REVIEWER_WORKSPACE','GITHUB_GATEWAY_RUNTIME_DIR','GITHUB_GATEWAY_CREDENTIALS_ROOT']) {
+    const p=env[key];if(!p)continue;
+    if(!path.isAbsolute(p) || path.resolve(p)!==p)fail('identity path must be absolute and canonical');
+    if([paths.base,paths.home,paths.home+'.img'].some(h=>p===h || p.startsWith(h+'/') || h.startsWith(p+'/')))fail('fourth paths overlap existing role');
+  }
+  for(let p=root;p!=='/';p=path.dirname(p)) {
+    let st;try{st=fs.lstatSync(p);}catch(e){if(e.code==='ENOENT')continue;throw e;}
+    if(!st.isDirectory() || st.isSymbolicLink() || ![0,10001,process.getuid(),...(process.getuid()===0 && /^[0-9]+$/.test(env.SUDO_UID??'')?[Number(env.SUDO_UID)]:[])].includes(st.uid) || ((st.mode&0o022) && !(p==='/tmp'&&(st.mode&0o1000))))fail('unsafe fourth parent');
+  }
+  for(const [p,mode]of[[paths.base,0o755],[paths.credentials,0o700],[paths.workspace,0o755]]) {
+    try{const st=fs.lstatSync(p);if(!st.isDirectory()||st.uid!==10001||st.gid!==10001||(st.mode&0o7777)!==mode)fail('existing fourth layout conflict');}catch(e){if(e.code!=='ENOENT')throw e;}
+  }
+  if(fs.existsSync(paths.base) && fs.readdirSync(paths.base).some(n=>!['credentials','workspace'].includes(n)))fail('foreign fourth layout entry');
+  return paths;
+}
 export function prepareHostLayout(root,env=process.env) {
   const paths=validateHostLayout(root,env);
   if(process.getuid()!==0)fail('fourth layout preparation requires trusted host root');
@@ -216,6 +241,9 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
       if(command==='validate-host'){/* public mapping validation only */}
       else if(command==='install-host')installHostIdentity(record,dir);
       else checkHostInstall(record,dir,runtimeOwner,command==='check-host');
+    } else if (command==='validate-host-repository-layout') {
+      if(args.length)fail('invalid fourth repository layout arguments');
+      validateHostRepositoryLayout(input);
     } else if (['validate-host-layout','prepare-host-layout'].includes(command)) {
       if(args.length)fail('invalid fourth layout arguments');
       if(command==='prepare-host-layout')prepareHostLayout(input);else validateHostLayout(input);

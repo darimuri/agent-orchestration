@@ -289,3 +289,48 @@ test('synthetic root facade: umask0077 selected layout preparation is repeatable
  const result=run(process.execPath,['--experimental-vm-modules','--input-type=module','-e',source,path.join(here,'git-identity.mjs'),runtime]);
  assert.equal(result.status,0,result.stderr);
 });
+
+test('synthetic private-store permissions: repository API never traverses private or legacy boundaries', t => {
+ const {root}=setup(t), runtime=root+'/runtime';
+ const source=`
+ const fs=await import('node:fs'),vm=await import('node:vm'),path=await import('node:path'),url=await import('node:url'),assert=(await import('node:assert/strict')).default;
+ const filename=process.argv[1],root=process.argv[2],native=fs.default,base=root+'/host-operator',store=root+'/state-storage',legacy=root+'/legacy-private';
+ for(const [p,mode]of[[root,0o755],[base,0o755],[base+'/credentials',0o700],[base+'/workspace',0o755],[store,0o700],[legacy,0o700]]){native.mkdirSync(p,{mode});native.chmodSync(p,mode);}
+ const accesses=[];let badPath=null,bad={};
+ const facade={...native,lstatSync(p){accesses.push(p);if(p.startsWith(store+'/')||p.startsWith(legacy+'/'))throw Object.assign(Error('synthetic private EACCES'),{code:'EACCES'});const st=native.lstatSync(p);return new Proxy(st,{get(o,k){if(p===badPath&&k in bad)return bad[k];if(p===store&&(k==='uid'||k==='gid'))return 0;if((p===base||p.startsWith(base+'/'))&&(k==='uid'||k==='gid'))return 10001;return Reflect.get(o,k);}});}};
+ const context=vm.createContext({console,process:{getuid:()=>10001,argv:[],env:{}}}),imports={'node:fs':facade,'node:path':path.default,'node:url':url};
+ const mod=new vm.SourceTextModule(native.readFileSync(filename,'utf8'),{context,initializeImportMeta(meta){meta.url=url.pathToFileURL(filename).href;}});
+ await mod.link(async name=>{const value=imports[name];if(!value)throw Error('unexpected import');const keys=name==='node:fs'||name==='node:path'?['default']:Object.keys(value);return new vm.SyntheticModule(keys,function(){for(const k of keys)this.setExport(k,k==='default'?value:value[k]);},{context});});await mod.evaluate();
+ const {validateHostLayout:full,validateHostRepositoryLayout:publicLayout}=mod.namespace;
+ const env={DEVELOPER_CREDENTIALS_DIR:legacy+'/credentials',GITHUB_GATEWAY_CREDENTIALS_ROOT:legacy+'/gateway'};
+ const before=[store,base,base+'/credentials',base+'/workspace'].map(p=>{const s=native.statSync(p);return[s.ino,s.mode,s.uid,s.gid];});
+ assert.throws(()=>full(root,env),e=>e.code==='EACCES');accesses.length=0;
+ for(let i=0;i<2;i++){const p=publicLayout(root,env);assert.equal(p.workspace,base+'/workspace');assert.equal(p.home,store+'/host-operator');}
+ assert(!accesses.some(p=>p===store||p.startsWith(store+'/')||p===legacy||p.startsWith(legacy+'/')));
+ assert.deepEqual([store,base,base+'/credentials',base+'/workspace'].map(p=>{const s=native.statSync(p);return[s.ino,s.mode,s.uid,s.gid];}),before);
+ for(const key of ['DISPATCHER_CREDENTIALS_DIR','DEVELOPER_CREDENTIALS_DIR','REVIEWER_CREDENTIALS_DIR','DISPATCHER_WORKSPACE','DEVELOPER_WORKSPACE','REVIEWER_WORKSPACE','GITHUB_GATEWAY_RUNTIME_DIR','GITHUB_GATEWAY_CREDENTIALS_ROOT'])for(const p of [base,base+'/workspace/nested',store+'/host-operator',store+'/host-operator/child',store+'/host-operator.img',store+'/host-operator.img/child',root])assert.throws(()=>publicLayout(root,{[key]:p}));
+ for(const p of [root+'/../runtime',root+'/',root+'//child','relative','/workspace/fixture/root','/etc/fixture/root'])assert.throws(()=>publicLayout(p,{}));
+ for(const p of [base,base+'/credentials',base+'/workspace'])for(const fields of [{uid:12345},{gid:12345},{mode:0o40777}]){badPath=p;bad=fields;assert.throws(()=>publicLayout(root,{}));}badPath=root;for(const fields of [{uid:12345},{mode:0o40777}]){bad=fields;assert.throws(()=>publicLayout(root,{}));}badPath=null;
+ native.writeFileSync(base+'/foreign','sentinel');assert.throws(()=>publicLayout(root,{}));native.unlinkSync(base+'/foreign');
+ for(const p of [base+'/workspace',base+'/credentials']){native.renameSync(p,p+'-saved');native.symlinkSync(p+'-saved',p);assert.throws(()=>publicLayout(root,{}));native.unlinkSync(p);native.renameSync(p+'-saved',p);}
+ native.symlinkSync(root,root+'-alias');assert.throws(()=>publicLayout(root+'-alias',{}));
+ assert.throws(()=>publicLayout(root,{DEVELOPER_CREDENTIALS_DIR:legacy+'/../alias'}));
+ assert.throws(()=>full(root,env),e=>e.code==='EACCES');
+ `;
+ const result=run(process.execPath,['--experimental-vm-modules','--input-type=module','-e',source,path.join(here,'git-identity.mjs'),runtime]);
+ assert.equal(result.status,0,result.stderr);
+});
+
+test('repository-public CLI arguments and selected-only caller preserve full-validator dispatch', t => {
+ const {root}=setup(t), module=path.join(here,'git-identity.mjs'),runtime=root+'/runtime';
+ const env={PATH:process.env.PATH,HOME:root};
+ assert.equal(run(process.execPath,[module,'validate-host-repository-layout',runtime],{env}).status,0);
+ for(const args of [[],[runtime,'extra'],['relative']])assert.notEqual(run(process.execPath,[module,'validate-host-repository-layout',...args],{env}).status,0);
+ const scripts=path.join(here,'../scripts');
+ const callers=fs.readdirSync(scripts).filter(f=>f.endsWith('.sh')&&!f.startsWith('test-')&&fs.readFileSync(path.join(scripts,f),'utf8').includes('validate-host-repository-layout'));
+ assert.deepEqual(callers,['provision-agent-repository.sh']);
+ const script=fs.readFileSync(path.join(scripts,callers[0]),'utf8');
+ assert.match(script,/if \[\[ "\$selected_host" == true \]\]; then\n  required_variables=[\s\S]*?validate-host-repository-layout/);
+ for(const name of ['provision-runtime.sh','preflight.sh','provision-buzz-agent-identity.sh','provision-kaneo-credential.sh'])assert(fs.readFileSync(path.join(scripts,name),'utf8').includes('validate-host-layout'));
+ assert.deepEqual(personas,['dispatcher-planner','developer-a','reviewer-a']);
+});
