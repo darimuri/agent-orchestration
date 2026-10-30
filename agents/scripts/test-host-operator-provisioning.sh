@@ -4,7 +4,7 @@ set -euo pipefail
 umask 077
 (( EUID == 0 )) || { echo 'requires trusted disposable root host' >&2; exit 1; }
 [[ $# == 1 && "$1" != -* ]] || { echo 'supply isolated test Codex image tag/digest' >&2; exit 1; }
-for tool in docker node git flock findmnt losetup mkfs.ext4 fallocate mount umount sudo id stat; do command -v "$tool" >/dev/null || { echo 'host fixture prerequisite missing' >&2; exit 1; }; done
+for tool in docker node git flock findmnt losetup mkfs.ext4 fallocate mount umount sudo id stat install; do command -v "$tool" >/dev/null || { echo 'host fixture prerequisite missing' >&2; exit 1; }; done
 # An isolated nonroot fixture account must have existing noninteractive sudo.
 : "${HOST_OPERATOR_TEST_HOST_USER:?supply disposable nonroot fixture account}"
 [[ "$HOST_OPERATOR_TEST_HOST_USER" =~ ^[a-z_][a-z0-9_-]*$ ]] || exit 1
@@ -26,8 +26,15 @@ mkdir -p "$runtime" "$scratch/run" "$scratch/host-home";chmod 0755 "$scratch" "$
 chown "$host_uid:$host_gid" "$scratch/run" "$scratch/host-home"
 cp "$root_dir/git-identities.example.json" "$scratch/legacy.json"
 cp "$root_dir/host-operator-git-identity.example.json" "$scratch/host.json"
-for role in dispatcher-planner developer-a reviewer-a github-gateway; do mkdir -p "$runtime/$role";echo 'old fixture sentinel' > "$runtime/$role/sentinel";done
-snapshot(){ find "$runtime/dispatcher-planner" "$runtime/developer-a" "$runtime/reviewer-a" "$runtime/github-gateway" -type f -exec sha256sum {} + | sort; }
+# These empty disposable role bases are public metadata; sentinel contents stay private.
+for role in dispatcher-planner developer-a reviewer-a github-gateway; do
+ install -d -m 0755 -o 0 -g 0 "$runtime/$role"
+ [[ "$(stat -c %u:%g:%a "$runtime/$role")" == 0:0:755 ]]
+ echo 'old fixture sentinel' > "$runtime/$role/sentinel"
+done
+snapshot(){
+ stat -c '%n:%u:%g:%a' "$runtime/dispatcher-planner" "$runtime/developer-a" "$runtime/reviewer-a" "$runtime/github-gateway"
+ find "$runtime/dispatcher-planner" "$runtime/developer-a" "$runtime/reviewer-a" "$runtime/github-gateway" -type f -exec sha256sum {} + | sort; }
 snapshot > "$scratch/before"
 cat > "$scratch/fixture.env" <<EOF
 AGENT_RUNTIME_ROOT=$runtime
