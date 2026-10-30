@@ -100,7 +100,7 @@ done
 
 if [[ "$selected_host" == true ]]; then
   [[ "$AGENT_RUNTIME_UID:$AGENT_RUNTIME_GID" == 10001:10001 ]] || die 'fixed fourth UID required'
-  node "$root_dir/docker/git-identity.mjs" validate-host-layout "$AGENT_RUNTIME_ROOT"
+  node "$root_dir/docker/git-identity.mjs" validate-host-credential-layout "$AGENT_RUNTIME_ROOT"
   node "$root_dir/docker/git-identity.mjs" validate-host-buzz "$BUZZ_AGENT_OWNER_HEX" "$HOST_OPERATOR_EXISTING_BUZZ_PUBKEYS" "$HOST_OPERATOR_BUZZ_PUBKEY" "$HOST_OPERATOR_BUZZ_PUBKEY"
 fi
 declare -A credentials_dirs=(

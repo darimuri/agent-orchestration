@@ -42,7 +42,7 @@ set +a
 if [[ "$selected_host" == true ]]; then
   : "${AGENT_RUNTIME_ROOT:?AGENT_RUNTIME_ROOT required}"
   : "${HOST_OPERATOR_KANEO_USER_ID:?dedicated public actor mapping required}"
-  node "$root_dir/docker/git-identity.mjs" validate-host-layout "$AGENT_RUNTIME_ROOT"
+  node "$root_dir/docker/git-identity.mjs" validate-host-credential-layout "$AGENT_RUNTIME_ROOT"
 fi
 case "${role}" in
   host-operator)

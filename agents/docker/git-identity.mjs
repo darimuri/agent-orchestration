@@ -200,9 +200,9 @@ export function validateHostLayout(root,env=process.env) {
   if(fs.existsSync(paths.base) && fs.readdirSync(paths.base).some(n=>!['credentials','workspace'].includes(n)))fail('foreign fourth layout entry');
   return paths;
 }
-// Repository placement checks public paths only. Private HOME/image and legacy
+// Repository and credential placement check public paths only. Private HOME/image and legacy
 // boundaries participate lexically; state/preflight retain full traversal authority.
-export function validateHostRepositoryLayout(root,env=process.env) {
+export function validateHostCredentialLayout(root,env=process.env) {
   if(typeof root!=='string' || !/^\/[A-Za-z0-9_./-]+$/.test(root) || root.split('/').length<4)fail('unsafe fourth root');
   safePath(root);
   const repository=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'../..');
@@ -225,6 +225,10 @@ export function validateHostRepositoryLayout(root,env=process.env) {
   if(fs.existsSync(paths.base) && fs.readdirSync(paths.base).some(n=>!['credentials','workspace'].includes(n)))fail('foreign fourth layout entry');
   return paths;
 }
+// Preserve the repository API while sharing one public-layout policy.
+export function validateHostRepositoryLayout(root,env=process.env) {
+  return validateHostCredentialLayout(root,env);
+}
 export function prepareHostLayout(root,env=process.env) {
   const paths=validateHostLayout(root,env);
   if(process.getuid()!==0)fail('fourth layout preparation requires trusted host root');
@@ -241,6 +245,9 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
       if(command==='validate-host'){/* public mapping validation only */}
       else if(command==='install-host')installHostIdentity(record,dir);
       else checkHostInstall(record,dir,runtimeOwner,command==='check-host');
+    } else if (command==='validate-host-credential-layout') {
+      if(args.length)fail('invalid fourth credential layout arguments');
+      validateHostCredentialLayout(input);
     } else if (command==='validate-host-repository-layout') {
       if(args.length)fail('invalid fourth repository layout arguments');
       validateHostRepositoryLayout(input);
