@@ -301,7 +301,8 @@ test('synthetic private-store permissions: repository API never traverses privat
  const context=vm.createContext({console,process:{getuid:()=>10001,argv:[],env:{}}}),imports={'node:fs':facade,'node:path':path.default,'node:url':url};
  const mod=new vm.SourceTextModule(native.readFileSync(filename,'utf8'),{context,initializeImportMeta(meta){meta.url=url.pathToFileURL(filename).href;}});
  await mod.link(async name=>{const value=imports[name];if(!value)throw Error('unexpected import');const keys=name==='node:fs'||name==='node:path'?['default']:Object.keys(value);return new vm.SyntheticModule(keys,function(){for(const k of keys)this.setExport(k,k==='default'?value:value[k]);},{context});});await mod.evaluate();
- const {validateHostLayout:full,validateHostRepositoryLayout:publicLayout}=mod.namespace;
+ const {validateHostLayout:full,validateHostRepositoryLayout:repositoryLayout,validateHostCredentialLayout:credentialLayout}=mod.namespace;
+ const publicLayout=(root,env)=>{const a=credentialLayout(root,env),b=repositoryLayout(root,env);assert.deepEqual(a,b);return a;};
  const env={DEVELOPER_CREDENTIALS_DIR:legacy+'/credentials',GITHUB_GATEWAY_CREDENTIALS_ROOT:legacy+'/gateway'};
  const before=[store,base,base+'/credentials',base+'/workspace'].map(p=>{const s=native.statSync(p);return[s.ino,s.mode,s.uid,s.gid];});
  assert.throws(()=>full(root,env),e=>e.code==='EACCES');accesses.length=0;
@@ -331,6 +332,10 @@ test('repository-public CLI arguments and selected-only caller preserve full-val
  assert.deepEqual(callers,['provision-agent-repository.sh']);
  const script=fs.readFileSync(path.join(scripts,callers[0]),'utf8');
  assert.match(script,/if \[\[ "\$selected_host" == true \]\]; then\n  required_variables=[\s\S]*?validate-host-repository-layout/);
- for(const name of ['provision-runtime.sh','preflight.sh','provision-buzz-agent-identity.sh','provision-kaneo-credential.sh'])assert(fs.readFileSync(path.join(scripts,name),'utf8').includes('validate-host-layout'));
+ for(const name of ['provision-runtime.sh','preflight.sh'])assert(fs.readFileSync(path.join(scripts,name),'utf8').includes('validate-host-layout'));
+ const credentialCallers=fs.readdirSync(scripts).filter(f=>f.endsWith('.sh')&&!f.startsWith('test-')&&fs.readFileSync(path.join(scripts,f),'utf8').includes('validate-host-credential-layout'));
+ assert.deepEqual(credentialCallers,['provision-buzz-agent-identity.sh','provision-kaneo-credential.sh']);
+ assert.equal(run(process.execPath,[module,'validate-host-credential-layout',runtime],{env}).status,0);
+ for(const args of [[],[runtime,'extra'],['relative']])assert.notEqual(run(process.execPath,[module,'validate-host-credential-layout',...args],{env}).status,0);
  assert.deepEqual(personas,['dispatcher-planner','developer-a','reviewer-a']);
 });

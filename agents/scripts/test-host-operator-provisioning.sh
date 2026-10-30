@@ -89,6 +89,14 @@ state_snapshot(){
  find "$runtime/state-storage/host-operator" -xdev -type f -exec sha256sum {} + | sort
 }
 state_snapshot > "$scratch/state-before"
+# Root denial remains before any TTY/device/auth operation.
+if bash "$root_dir/scripts/provision-kaneo-credential.sh" --agent host-operator "$scratch/fixture.env" > "$scratch/kaneo-root-denial" 2>&1;then echo 'Kaneo root invocation accepted' >&2;exit 1;fi
+grep -q 'run as the host user' "$scratch/kaneo-root-denial"
+# Placement and unchanged privileged credential checks after real private state exists.
+for i in 1 2; do
+ as_host -c 'node "$1/docker/git-identity.mjs" validate-host-credential-layout "$2" && sudo node "$1/docker/git-identity.mjs" check-host "$3" "$4" "$2/host-operator/credentials"' fixture "$root_dir" "$runtime" "$scratch/host.json" "$scratch/legacy.json"
+ state_snapshot > "$scratch/state-credential-after";cmp "$scratch/state-before" "$scratch/state-credential-after"
+done
 for i in 1 2; do
  as_host "$root_dir/scripts/provision-agent-repository.sh" --agent host-operator fixture-org/example main "$scratch/fixture.env"
  [[ "$(stat -c %u:%g:%a:%h "$scratch/run/provision.lock")" == "$host_uid:$host_gid:600:1" ]]

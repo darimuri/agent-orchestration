@@ -6,9 +6,9 @@ umask 077
 root_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 scratch="$(mktemp -d)"
 bin_dir="$(mktemp -d "${TEST_EXECUTABLE_TMPDIR:-/tmp}/host-identity-bin.XXXXXX")"
-trap 'rm -rf "$scratch" "$bin_dir"' EXIT
-mkdir -p "$bin_dir" "$scratch/runtime/host-operator/credentials" "$scratch/run"
-chmod 0755 "$scratch/runtime/host-operator"
+trap 'chmod 0700 "$scratch/runtime/state-storage" 2>/dev/null || true; rm -rf "$scratch" "$bin_dir"' EXIT
+mkdir -p "$bin_dir" "$scratch/runtime/host-operator/credentials" "$scratch/runtime/host-operator/workspace" "$scratch/run"
+chmod 0755 "$scratch/runtime/host-operator" "$scratch/runtime/host-operator/workspace"
 # Only dummy sentinels are ever read by these controlled local command doubles.
 node --input-type=module - "$scratch" <<'JS'
 import fs from'node:fs';const root=process.argv[2],owner='a'.repeat(64);
@@ -22,6 +22,7 @@ cat > "$bin_dir/docker" <<'JS'
 import fs from'node:fs';const args=process.argv.slice(2);fs.appendFileSync(process.env.FIXTURE_CALLS,args[0]+' '+args.slice(1,3).join(' ')+'\n');
 if(args[0]==='image'){console.log('c8f73213089cbd5a0f1e675d3193558280d46e10');process.exit(0);}
 if(args[0]!=='run')process.exit(91);
+if(args.includes('--interactive')){fs.appendFileSync(process.env.FIXTURE_CALLS,'device-denied\n');process.exit(94);} // Offline denial only, no device session.
 const mounts=args.flatMap((x,i)=>x==='--mount'?[args[i+1]]:[]);const source=mounts.map(m=>/src=([^,]+)/.exec(m)?.[1]).find(Boolean);
 const ep=args[args.indexOf('--entrypoint')+1];
 if(ep==='cat'){process.stdout.write(fs.readFileSync(source));process.exit(0);}
@@ -29,7 +30,7 @@ if(ep==='sh'){
  const literal=args.at(-1);
  if(literal.includes('test -f "/run/agent/credentials/')){const n=args.find(x=>x.startsWith('CREDENTIAL_FILENAME=')).split('=')[1];process.exit(fs.existsSync(source+'/'+n)?0:1);}
  if(literal.includes('test ! -L /run/agent/credentials')){
-  for(const n of fs.readdirSync(source)){const s=fs.lstatSync(source+'/'+n);if(!s.isFile()||s.isSymbolicLink()||s.nlink!==1||(s.mode&0o777)!==0o600)process.exit(1);}process.exit(0);
+  for(const n of fs.readdirSync(source)){const s=fs.lstatSync(source+'/'+n);if(!['gitconfig','buzz-private-key','buzz-auth-tag','kaneo-credentials.json','codex-auth.json','openai-api-key'].includes(n)||!s.isFile()||s.isSymbolicLink()||s.uid!==10001||s.gid!==10001||s.nlink!==1||(s.mode&0o777)!==0o600)process.exit(1);}process.exit(0);
  }
 }
 process.exit(92);
@@ -53,17 +54,32 @@ BUZZ_OWNER_PRIVATE_KEY_FILE=$scratch/owner
 BUZZ_NAK_BIN=$bin_dir/nak
 HOST_OPERATOR_EXISTING_BUZZ_PUBKEYS=$(printf '1%.0s' {1..64}),$(printf '2%.0s' {1..64}),$(printf '3%.0s' {1..64})
 HOST_OPERATOR_BUZZ_PUBKEY=$(printf '4%.0s' {1..64})
+HOST_OPERATOR_KANEO_USER_ID=fixture-independent-actor
+HOST_OPERATOR_GIT_IDENTITY_MANIFEST=$root_dir/host-operator-git-identity.example.json
+AGENT_GIT_IDENTITY_MANIFEST=$root_dir/git-identities.example.json
+KANEO_API_URL=https://fixture.invalid
 DISPATCHER_CREDENTIALS_DIR=$scratch/runtime/dispatcher-planner/credentials
 DEVELOPER_CREDENTIALS_DIR=$scratch/runtime/developer-a/credentials
 REVIEWER_CREDENTIALS_DIR=$scratch/runtime/reviewer-a/credentials
 EOF
 export PATH="$bin_dir:$PATH" FIXTURE_CALLS="$scratch/calls" XDG_RUNTIME_DIR="$scratch/run" AGENT_ENV_FILE="$scratch/fixture.env"
 : > "$FIXTURE_CALLS"
-# validate-host-layout insists on real 10001 ownership; caller in source image is10001.
+# Synthetic inaccessible store: real EACCES but current-UID ownership, no real ext4/mount.
+mkdir -p "$scratch/runtime/state-storage/host-operator"
+printf 'private fixture marker' > "$scratch/runtime/state-storage/host-operator/marker"
+printf 'private fixture image' > "$scratch/runtime/state-storage/host-operator.img"
+private_before="$(find "$scratch/runtime/state-storage" -type f -exec sha256sum {} + | sort)"
+chmod 000 "$scratch/runtime/state-storage"
+private_metadata="$(stat -c %d:%i:%u:%g:%a "$scratch/runtime/state-storage")"
+if node "$root_dir/docker/git-identity.mjs" validate-host-layout "$scratch/runtime" > "$scratch/full-negative" 2>&1;then echo 'Full validator bypassed inaccessible store' >&2;exit 1;fi
+node "$root_dir/docker/git-identity.mjs" validate-host-credential-layout "$scratch/runtime"
+# Selected verify-only uses existing dummy inputs twice; no tag/key writes.
 if [[ "$(id -u):$(id -g)" == 10001:10001 ]]; then
-  before="$(sha256sum "$scratch/runtime/host-operator/credentials/buzz-auth-tag")"
+  before="$(stat -c %d:%i:%u:%g:%a "$scratch/runtime/host-operator/credentials/buzz-auth-tag" "$scratch/runtime/host-operator/credentials/buzz-private-key");$(sha256sum "$scratch/runtime/host-operator/credentials/buzz-auth-tag" "$scratch/runtime/host-operator/credentials/buzz-private-key")"
+  for attempt in 1 2; do
   bash "$root_dir/scripts/provision-buzz-agent-identity.sh" --verify-only --agent host-operator > "$scratch/output" 2>&1 || { cat "$scratch/output"; exit 1; }
-  [[ "$(sha256sum "$scratch/runtime/host-operator/credentials/buzz-auth-tag")" == "$before" ]]
+  [[ "$(stat -c %d:%i:%u:%g:%a "$scratch/runtime/host-operator/credentials/buzz-auth-tag" "$scratch/runtime/host-operator/credentials/buzz-private-key");$(sha256sum "$scratch/runtime/host-operator/credentials/buzz-auth-tag" "$scratch/runtime/host-operator/credentials/buzz-private-key")" == "$before" ]]
+  done
   grep -q 'Verified 1' "$scratch/output"
   if FORCE_FIXTURE_PUBKEY="$(printf '1%.0s' {1..64})" bash "$root_dir/scripts/provision-buzz-agent-identity.sh" --verify-only --agent host-operator > "$scratch/negative" 2>&1; then echo 'Copied identity accepted' >&2; exit 1; fi
 fi
@@ -77,3 +93,61 @@ done
 if grep -Eq 'fixture-owner|fixture-[1234]' "$scratch/output" "$scratch/default" "$scratch/negative" 2>/dev/null; then echo 'Fixture secret leaked' >&2; exit 1; fi
 if grep -q 'nak event\|build' "$FIXTURE_CALLS"; then echo 'verify-only attempted publication' >&2; exit 1; fi
 echo 'Offline identity dispatch/verify-only fixtures PASS (synthetic; no live auth/cryptographic acceptance)'
+
+creds="$scratch/runtime/host-operator/credentials"
+if FORCE_FIXTURE_PUBKEY="$(printf '5%.0s' {1..64})" bash "$root_dir/scripts/provision-buzz-agent-identity.sh" --verify-only --agent host-operator > "$scratch/mismatch" 2>&1;then echo 'Mismatched key accepted' >&2;exit 1;fi
+buzz_must_fail(){ if bash "$root_dir/scripts/provision-buzz-agent-identity.sh" --verify-only --agent host-operator > "$scratch/metadata-negative" 2>&1;then echo 'Unsafe credential accepted' >&2;exit 1;fi; }
+printf 'foreign' > "$creds/foreign";buzz_must_fail;rm "$creds/foreign"
+ln "$creds/buzz-private-key" "$scratch/shared-key";buzz_must_fail;rm "$scratch/shared-key"
+mv "$creds/buzz-private-key" "$scratch/key-saved";ln -s "$scratch/key-saved" "$creds/buzz-private-key";buzz_must_fail;rm "$creds/buzz-private-key";mv "$scratch/key-saved" "$creds/buzz-private-key"
+# Kaneo uses a real PTY and synthetic sudo/Docker only. No root/device/network operation.
+command -v script >/dev/null || { echo 'PTY fixture requires util-linux script' >&2;exit 1; }
+cat > "$bin_dir/sudo" <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+printf 'sudo %s\n' "$*" >> "$FIXTURE_CALLS"
+[[ "${FAIL_FIXTURE_SUDO:-0}" != 1 ]] || exit 95
+exec "$@"
+SH
+chmod 0755 "$bin_dir/sudo"
+node --input-type=module - "$root_dir" "$scratch/runtime/host-operator/credentials" <<'JS'
+import{pathToFileURL}from'node:url';const[root,dir]=process.argv.slice(2);const{loadHostManifest,installHostIdentity}=await import(pathToFileURL(root+'/docker/git-identity.mjs'));installHostIdentity(loadHostManifest(root+'/host-operator-git-identity.example.json',root+'/git-identities.example.json'),dir);
+JS
+kaneo_tty(){ script -q -e -c "bash '$root_dir/scripts/provision-kaneo-credential.sh' --agent host-operator '$1'" /dev/null < /dev/null; }
+: > "$FIXTURE_CALLS"
+if bash "$root_dir/scripts/provision-kaneo-credential.sh" --agent host-operator "$scratch/fixture.env" > "$scratch/no-tty" 2>&1;then echo 'NonTTY accepted' >&2;exit 1;fi
+grep -q 'interactive terminal' "$scratch/no-tty";[[ ! -s "$FIXTURE_CALLS" ]]
+for attempt in 1 2;do
+ : > "$FIXTURE_CALLS"
+ if kaneo_tty "$scratch/fixture.env" > "$scratch/kaneo" 2>&1;then echo 'Synthetic device denial accepted' >&2;exit 1;fi
+ grep -q 'sudo .* check-host ' "$FIXTURE_CALLS";grep -q 'device-denied' "$FIXTURE_CALLS"
+ awk '/sudo .* check-host / {checked=1} /device-denied/ {if(!checked)exit 1;seen=1} END{if(!seen)exit 1}' "$FIXTURE_CALLS"
+done
+: > "$FIXTURE_CALLS"
+if FAIL_FIXTURE_SUDO=1 kaneo_tty "$scratch/fixture.env" > "$scratch/sudo-denied" 2>&1;then echo 'Privileged check failure accepted' >&2;exit 1;fi
+! grep -q 'device-denied' "$FIXTURE_CALLS"
+creds="$scratch/runtime/host-operator/credentials"
+printf '{"fixture":"existing-session"}' > "$creds/kaneo-credentials.json"
+session_before="$(sha256sum "$creds/kaneo-credentials.json")"
+: > "$FIXTURE_CALLS"
+if kaneo_tty "$scratch/fixture.env" > "$scratch/kaneo-existing" 2>&1;then echo 'Existing session accepted without --replace' >&2;exit 1;fi
+grep -q 'use --replace' "$scratch/kaneo-existing";! grep -q 'device-denied' "$FIXTURE_CALLS"
+[[ "$(sha256sum "$creds/kaneo-credentials.json")" == "$session_before" ]]
+sed '/^HOST_OPERATOR_KANEO_USER_ID=/d' "$scratch/fixture.env" > "$scratch/no-actor.env"
+: > "$FIXTURE_CALLS"
+if kaneo_tty "$scratch/no-actor.env" > "$scratch/no-actor" 2>&1;then echo 'Missing actor accepted' >&2;exit 1;fi
+[[ ! -s "$FIXTURE_CALLS" ]]
+cp "$creds/gitconfig" "$scratch/gitconfig.saved";printf 'foreign Git identity' > "$creds/gitconfig"
+: > "$FIXTURE_CALLS"
+if kaneo_tty "$scratch/fixture.env" > "$scratch/wrong-git" 2>&1;then echo 'Wrong Git identity accepted' >&2;exit 1;fi
+! grep -q 'device-denied' "$FIXTURE_CALLS";cp "$scratch/gitconfig.saved" "$creds/gitconfig"
+chmod 0644 "$creds/buzz-auth-tag"
+if bash "$root_dir/scripts/provision-buzz-agent-identity.sh" --verify-only --agent host-operator > "$scratch/wrong-mode" 2>&1;then echo 'Malformed credential accepted' >&2;exit 1;fi
+: > "$FIXTURE_CALLS"
+if kaneo_tty "$scratch/fixture.env" > "$scratch/kaneo-mode" 2>&1;then echo 'Kaneo malformed credential accepted' >&2;exit 1;fi
+! grep -q 'device-denied' "$FIXTURE_CALLS";chmod 0600 "$creds/buzz-auth-tag"
+[[ "$(stat -c %d:%i:%u:%g:%a "$scratch/runtime/state-storage")" == "$private_metadata" ]]
+# Only restore synthetic fixture permissions for final content comparison/cleanup.
+chmod 0700 "$scratch/runtime/state-storage"
+[[ "$(find "$scratch/runtime/state-storage" -type f -exec sha256sum {} + | sort)" == "$private_before" ]]
+echo 'Offline post-state Buzz/Kaneo public-layout/TTY/pre-device fixtures PASS (synthetic only)'
