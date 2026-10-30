@@ -53,7 +53,9 @@ if PROVISION_RUNTIME_TEST_MODE=1 bash "$root_dir/scripts/provision-runtime.sh" "
 [[ ! -e "$runtime/host-operator" ]]
 # Repeated explicit provisioning under the fixture's umask0077 must preserve modes/inodes.
 for i in 1 2; do
- PROVISION_RUNTIME_TEST_MODE=1 bash "$root_dir/scripts/provision-runtime.sh" --agent host-operator "$scratch/fixture.env"
+ as_host -c 'umask 077; exec bash "$@"' fixture "$root_dir/scripts/provision-runtime.sh" --agent host-operator "$scratch/fixture.env"
+ [[ -f "$scratch/run/provision.lock" && ! -L "$scratch/run/provision.lock" ]]
+ [[ "$(stat -c %u:%g:%a:%h "$scratch/run/provision.lock")" == "$host_uid:$host_gid:600:1" ]]
  [[ "$(stat -c %u:%g:%a "$runtime/host-operator")" == 10001:10001:755 ]]
  [[ "$(stat -c %u:%g:%a "$runtime/host-operator/credentials")" == 10001:10001:700 ]]
  [[ "$(stat -c %u:%g:%a "$runtime/host-operator/workspace")" == 10001:10001:755 ]]
@@ -82,6 +84,7 @@ state_snapshot(){
 state_snapshot > "$scratch/state-before"
 for i in 1 2; do
  as_host "$root_dir/scripts/provision-agent-repository.sh" --agent host-operator fixture-org/example main "$scratch/fixture.env"
+ [[ "$(stat -c %u:%g:%a:%h "$scratch/run/provision.lock")" == "$host_uid:$host_gid:600:1" ]]
  dest="$runtime/host-operator/workspace/fixture-org/example"
  clone_snapshot="$(stat -c %d:%i "$dest" "$dest/.git");$(git -c safe.directory="$dest" -C "$dest" rev-parse HEAD);$(git -c safe.directory="$dest" -C "$dest" remote get-url origin)"
  if [[ "$i" == 1 ]];then first_clone_snapshot="$clone_snapshot";else [[ "$first_clone_snapshot" == "$clone_snapshot" ]];fi
