@@ -295,48 +295,7 @@ caller-selected limits have no schema slot. References are never dereferenced.
 Only synthetic sanitized metadata belongs in test fixtures; do not paste raw
 private evidence into this index or assume the linter can sanitize arbitrary text.
 
-### Output and offline invocation
-
-The only operational `decision` is `NOT_READY`; `verification` is always
-`INDEPENDENTLY_UNVERIFIED`, including invalid input. Output is at most 4096 bytes:
-fixed version/contract identity, `structure`, fixed global `codes`, and fixed H1–H9
-IDs/decisions with deduplicated sorted diagnostic codes. It never echoes a reference,
-custodian, revision, timestamp, raw field, exception message or evidence content.
-
-| Structural result | Meaning | CLI exit |
-| --- | --- | --- |
-| INVALID | Bad schema, source pin, JSON/encoding, bounds, cutoff or conflicting metadata; no gate claims processed | 2 |
-| INCOMPLETE | At least one gate has `missing_references`, `review_policy_missing`, `revision_missing` or `stale_reference` | 1 |
-| COMPLETE | All structural reference requirements supplied; still independently unverified and operational NOT_READY | 3 |
-
-Global valid-input code is `independently_unverified`. Invalid-input codes are fixed:
-`invalid_input`, `invalid_encoding`, `invalid_json`, `duplicate_key`, `bounds`,
-`schema`, `invalid_cutoff`, `contract_mismatch`, `cutoff_mismatch`, `gate_set`,
-`fact_set`, `fact_status`, `fact_conflict`, `reference_schema`, `reference_time`,
-`duplicate_reference`, `reference_conflict`, `unknown_reference`, `unused_reference`,
-`output_bound`. Invalid input returns an empty gate list. No CLI result exits 0 or
-emits PASS/READY/activation. COMPLETE describes index structure only.
-
-Pipe the explicitly prepared metadata JSON into the stdin-only entrypoint and
-supply the chosen reproducible review cutoff. For syntax illustration only, the
-following cutoff is synthetic, not a live host fact or freshness recommendation:
-
-```text
-node agents/scripts/host-operator-evidence.mjs --as-of 1800000000000
-```
-
-There is no file-path argument, collector, output-file option or evidence opener.
-Run [the linter tests](scripts/host-operator-evidence.test.mjs) and the repository's
-full feasible Node suite for code verification; ordinary runs that skip A3 integration
-must report those skips. Synthetic all-unresolved, incremental and forged-complete
-fixtures verify preparation semantics, not H1–H9 host acceptance. This code never
-feeds `journal.next`, supplies a receipt or overrides `currentJob`.
-
-Named custodians and an authorized independent reviewer must still verify every
-protected evidence reference, applicable revision, validity policy and actual host
-fact. The owner must separately accept risks and authorize any later operation.
-No input can waive H7–H9 through H1–H6 structural completeness. Removing the A5
-module/tests and these documentation additions restores the A4 manual inventory;
-retain all existing UNRESOLVED rows, journals, receipts and pending outcomes.
-No live data collection, dependency change, installer, provider, ledger, executor,
-reporting, systemd/runtime/container/credential/job or activation change is included.
+### O…2981 tokens truncated…p/reap/seal/empty behavior, D-state/power-loss/manager death
+and hostile same-UID scenarios are NOT_TESTED by P1. All live H1–H9 remain NOT_READY.
+Rollback of P1 reverts only these four source paths; no operational rollback is
+performed. Independent Reviewer and human merge/activation remain separate gates.
