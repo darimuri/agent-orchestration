@@ -340,3 +340,135 @@ module/tests and these documentation additions restores the A4 manual inventory;
 retain all existing UNRESOLVED rows, journals, receipts and pending outcomes.
 No live data collection, dependency change, installer, provider, ledger, executor,
 reporting, systemd/runtime/container/credential/job or activation change is included.
+
+## A17 disposable kernel harness — P1 source preparation
+
+The four-path P1 harness is test tooling only. It does not change the A4 contract
+identity, H1–H9 decisions, production modules, journal, proof or reporting authority.
+Authority: AGE #7 task `r2908ui7wjzv8bek75we457e`, Planner
+`kemdakaibhcodhot1g3oymv4`, prerequisite `jx4ff49a288805gw7i0woegr`, owner
+assignment `3b86477f87e1bc882481fc7c2f2871c82f91a6858773813b9742aa4fdf39f531`.
+Source base: `main@0ecde076bacecc853ec25eb764bb81d42b56f1ae`, tree
+`b840d3e210630ff77548c4f5700f73b4ac1fd1e5`. Owner baseline
+`pd72u67dwu3vy9i1mljvualk` reports native 4/4, Gateway 170/170, integration
+86/86, inventory 541=540 pass/1 UID-gated skip, with that row separately passing
+under UID10001. These are owner executions, not Developer execution or live kernel
+acceptance. The historical integration wrapper's zero-skip requirement is distinct
+from the owner-reported green underlying stages.
+
+### Fixed disposable contract
+
+[The entry](tests/host-operator/a17-host-entry.mjs) calls the reviewed actual
+`createCgroupRevisionSupervisor` factory, with no injectable kernel facade. The
+fixed worker reads a detached HEAD fixture for the above base; its synthetic
+request/intent hashes and sourceDigest are test bindings only. No signed owner
+event, live job admission, journal, proof publication, native receipt or authority
+claim is created. Only the ordinary successful `status.revision` worker is covered;
+fast-exit/fault/helper-loss/group-stop experiments need their own explicit P2
+procedure and evidence. This harness does not add a production fault switch.
+
+A separately reviewed owner-private installation must be prepared at exactly
+`/home/dormael/.local/share/host-operator-a17-disposable`. This P1 change neither
+creates it nor copies existing private artifacts. Alternate paths are rejected.
+The runtime is `runtime/node`, actual Node v22.23.3 with SHA256
+`fde6a4bf8d0562f7751d1a2d6cb9b417c4cfe107bbcb0aa3e9a24e125e348f48`.
+The selected runtime, real `/proc/self/exe`, UID/eUID/GID/eGID1000 and installed entry
+identity must all match. Fixed executables are `/usr/bin/systemctl`,
+`/usr/bin/systemd-run`, and `native/revision-supervisor`; the reviewed entry lives
+under `install/agents/tests/host-operator/a17-host-entry.mjs`. Source modules retain
+their repository-relative layout under `install`; no package install is performed.
+
+Protected ancestry must have only root/UID1000 ownership, no symlinks or writable
+group/other permissions. Root, install, control and source directories are UID1000
+mode0700. Files are bounded, single-link, ordinary files, checked through no-follow
+FDs and stable metadata. The owner-private `config.json` and `baseline.evidence`
+are mode0400, UID1000. Configuration is a single canonical JSON object followed by
+one newline (`JSON.stringify(value) + '\n'`), with exactly:
+
+- `version`: 1.
+- `managerDigest`, `runnerDigest`, `helperDigest`, `workerDigest`: lowercase SHA256
+  for the fixed executables/worker above.
+- `files`: a complete repository-relative path-to-SHA256 mapping for every file
+  installed below `install`, including this entry, its full transitive module
+  closure and the reviewed backend. Only `agents/` paths with bounded ordinary
+  components are accepted. Extra/missing files reject; nothing is fetched.
+- `baselineEvidenceDigest`: SHA256 of the fixed private `baseline.evidence` file.
+
+The baseline evidence is an owner-custodied inventory reference, not a machine
+attestation or a waiver of review. Before P2, an independent reviewer must verify
+its current old-three/fourth/Gateway baseline, full native build/toolchain/ELF-loader
+closure and approved artifact provenance, current cgroup/clone3/pidfd/kill support,
+private root custody, clocks/storage and H1–H9 gaps. This harness hashes the
+baseline file; it cannot independently prove those host facts from that digest.
+Missing/stale/unsafe inventory blocks P2 even if structural validation succeeds.
+
+`source/.git/HEAD` contains exactly the fixed base SHA and a newline; it is disposable
+fixture data, not an operational checkout. `control` initially contains only the
+existing A17 `artifacts.json`, with the backend's exact full auth-module inventory
+and issuer digest. Existing attempt, started/result data, lock, extra entry or any
+existing unit is refused. There is no adoption, reset, overwrite or automatic retry.
+
+### Explicit modes and unit boundary
+
+[The shell driver](scripts/test-host-operator-a17-host.sh) accepts exactly one mode.
+`bash agents/scripts/test-host-operator-a17-host.sh --plan` emits fixed argv and
+`NO_ACTION / NOT_READY`; it does not query a manager or open private config.
+`--validate` checks the fixed installed configuration, runtime, artifact inventory,
+user manager/version (systemd255 or newer), cgroup2 delegation access and exact-unit
+absence, and emits `VALIDATED_NO_ACTION`. Validation performs read-only manager
+queries; no unit/data creation is allowed in this mode. A structural pass does not
+prove clone3 permission or live kernel containment.
+
+`--run-disposable` is a P2 action and MUST NOT be invoked in the P1 job. It requires
+separate owner hostAdmission, artifact/private installation review and authorization
+for this exact namespace. It durably creates an exclusive UNKNOWN attempt marker
+before invoking fixed `systemd-run --user`; a lost response remains UNKNOWN and is
+never retried. The exact transient unit is `host-operator.service`; existing
+loaded/inactive/failed/installed units all block. No alternate name, persistent unit,
+enable/restart/reload, PIDFile, socket or boot integration exists.
+
+MainPID directly executes pinned Node plus the installed entry `--service`, with
+Type=exec, ExitType=main, Delegate=yes, DelegateSubgroup=supervisor,
+RemainAfterExit=no, Restart=no, KillMode=control-group, SIGTERM then SIGKILL,
+SendSIGKILL=yes, TimeoutStopSec=2s, UMask0077, NoNewPrivileges=yes and empty capability
+sets. Stdout/stderr are null; results use the private fixed result file. The driver
+clears inherited environment; the unit unsets common manager defaults and accepts
+only fixed manager environment plus known systemd invocation metadata. Unexpected
+environment is denied. The actual backend independently verifies effective unit
+properties, invocation, MainPID, capability state and same service cgroup identity.
+Exact `/proc/self/cgroup` placement is `<ControlGroup>/supervisor` under UID1000's
+user-manager tree. No shell wrapper or request-selected command/argv/property/env,
+cgroup sibling, path/mount, sudo, root/capability fallback or Docker operation exists.
+
+The service writes an exclusive durable UNKNOWN started marker bound to its actual
+invocation before calling the actual backend, preventing a second service attempt
+in the same data namespace. Backend fatal70 is preserved. Only a settled matching
+worker observation produces `fixture_observed`; this is test output, not completion
+authority. Unknown/missing result, launch error, pruned/replaced/unreadable boundary,
+unconfirmed termination or cleanup failure remains UNKNOWN. Ordinary source tests
+cannot enable live execution through environment flags.
+
+### Cleanup and verification boundary
+
+Dispatch reports `DISPATCHED_NOT_VERIFIED`, never kernel PASS. No automatic stop,
+reset-failed, cgroup removal, namespace rotation, lock deletion, data deletion or
+journal recovery is implemented. All dispatches require owner inspection. After a
+separately authorized P2 run, the owner must bind the exact actual invocation to the
+attempt and evidence, stop only that owned transient service if necessary, prove
+same-boundary positive populated0 and leader/adopted-child reap before accepting
+cleanup, and preserve unknown attempts/artifacts/logs. Absence is never evidence of
+emptiness. If that evidence cannot be obtained, preserve the namespace and report
+UNKNOWN; do not rerun. Old-three/fourth/Gateway identities, images and restart counts
+must be compared to the approved baseline independently. No cleanup authority over
+other services or containers is granted by this source change.
+
+Source checks: new Node tests cover fixed planning/config/property/invocation
+contracts, source-location/runtime denial, invalid arguments, shell syntax/negative
+fixtures and inherited activation-flag rejection. Run the entire Docker/scripts
+Node inventory and the existing pinned integration/native checks where available;
+report exact head, counts, skips and missing compiler/dependency prerequisites.
+Source tests perform no actual transient-service/kernel acceptance. P2 containment,
+helper/MainPID death, stop/reap/seal/empty behavior, D-state/power-loss/manager death
+and hostile same-UID scenarios are NOT_TESTED by P1. All live H1–H9 remain NOT_READY.
+Rollback of P1 reverts only these four source paths; no operational rollback is
+performed. Independent Reviewer and human merge/activation remain separate gates.
