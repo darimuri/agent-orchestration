@@ -272,13 +272,18 @@ test('synthetic root facade: umask0077 selected layout preparation is repeatable
  const fs=await import('node:fs'),vm=await import('node:vm'),path=await import('node:path'),url=await import('node:url');
  const filename=process.argv[1],runtime=process.argv[2];process.umask(0o077);
  const native=fs.default,base=runtime+'/host-operator',created=[];
+ // Model only this fixture's ancestry and selected role directories, preserving real type/mode/inode.
+ const safeAncestors=new Set(),roleDirectories=new Set([base,base+'/credentials',base+'/workspace']);
+ for(let p=runtime;;p=path.dirname(p)){safeAncestors.add(p);if(p==='/')break;}
  const facade={...native,chownSync(p,uid,gid){if(uid!==10001||gid!==10001)throw Error('unexpected owner');created.push(p);},
- lstatSync(p){const st=native.lstatSync(p);return p===base||p.startsWith(base+'/')?new Proxy(st,{get(o,k){return k==='uid'||k==='gid'?10001:Reflect.get(o,k);}}):st;}};
+ lstatSync(p){const st=native.lstatSync(p);return new Proxy(st,{get(o,k){if(k==='uid'||k==='gid'){if(safeAncestors.has(p))return 0;if(roleDirectories.has(p))return 10001;}return Reflect.get(o,k);}});}};
  const context=vm.createContext({console,process:{getuid:()=>0,argv:[],env:{}}});
  const imports={'node:fs':facade,'node:path':path.default,'node:url':url};
  const mod=new vm.SourceTextModule(native.readFileSync(filename,'utf8'),{context,initializeImportMeta(meta){meta.url=url.pathToFileURL(filename).href;}});
  await mod.link(async name=>{const value=imports[name];if(!value)throw Error('unexpected import');const keys=name==='node:fs'||name==='node:path'?['default']:Object.keys(value);const m=new vm.SyntheticModule(keys,function(){for(const k of keys)this.setExport(k,k==='default'?value:value[k]);},{context});return m;});await mod.evaluate();
  const api=mod.namespace;api.prepareHostLayout(runtime,{});
+ for(const p of safeAncestors)if(facade.lstatSync(p).uid!==0||facade.lstatSync(p).gid!==0)throw Error('unsafe modeled ancestor');
+ for(const p of roleDirectories)if(facade.lstatSync(p).uid!==10001||facade.lstatSync(p).gid!==10001)throw Error('wrong modeled role owner');
  for(const [p,mode]of[[runtime,0o755],[base,0o755],[base+'/credentials',0o700],[base+'/workspace',0o755]])if((native.statSync(p).mode&0o7777)!==mode)throw Error('umask changed requested mode');
  const before=[base,base+'/credentials',base+'/workspace'].map(p=>native.statSync(p).ino);
  api.prepareHostLayout(runtime,{});api.validateHostLayout(runtime,{});
@@ -296,8 +301,11 @@ test('synthetic private-store permissions: repository API never traverses privat
  const fs=await import('node:fs'),vm=await import('node:vm'),path=await import('node:path'),url=await import('node:url'),assert=(await import('node:assert/strict')).default;
  const filename=process.argv[1],root=process.argv[2],native=fs.default,base=root+'/host-operator',store=root+'/state-storage',legacy=root+'/legacy-private';
  for(const [p,mode]of[[root,0o755],[base,0o755],[base+'/credentials',0o700],[base+'/workspace',0o755],[store,0o700],[legacy,0o700]]){native.mkdirSync(p,{mode});native.chmodSync(p,mode);}
+ // The runtime and its bounded ancestry are synthetic root; private descendants remain inaccessible.
+ const safeAncestors=new Set(),roleDirectories=new Set([base,base+'/credentials',base+'/workspace']);
+ for(let p=root;;p=path.dirname(p)){safeAncestors.add(p);if(p==='/')break;}
  const accesses=[];let badPath=null,bad={};
- const facade={...native,lstatSync(p){accesses.push(p);if(p.startsWith(store+'/')||p.startsWith(legacy+'/'))throw Object.assign(Error('synthetic private EACCES'),{code:'EACCES'});const st=native.lstatSync(p);return new Proxy(st,{get(o,k){if(p===badPath&&k in bad)return bad[k];if(p===store&&(k==='uid'||k==='gid'))return 0;if((p===base||p.startsWith(base+'/'))&&(k==='uid'||k==='gid'))return 10001;return Reflect.get(o,k);}});}};
+ const facade={...native,lstatSync(p){accesses.push(p);if(p.startsWith(store+'/')||p.startsWith(legacy+'/'))throw Object.assign(Error('synthetic private EACCES'),{code:'EACCES'});const st=native.lstatSync(p);return new Proxy(st,{get(o,k){if(p===badPath&&k in bad)return bad[k];if((p===store||safeAncestors.has(p))&&(k==='uid'||k==='gid'))return 0;if(roleDirectories.has(p)&&(k==='uid'||k==='gid'))return 10001;return Reflect.get(o,k);}});}};
  const context=vm.createContext({console,process:{getuid:()=>10001,argv:[],env:{}}}),imports={'node:fs':facade,'node:path':path.default,'node:url':url};
  const mod=new vm.SourceTextModule(native.readFileSync(filename,'utf8'),{context,initializeImportMeta(meta){meta.url=url.pathToFileURL(filename).href;}});
  await mod.link(async name=>{const value=imports[name];if(!value)throw Error('unexpected import');const keys=name==='node:fs'||name==='node:path'?['default']:Object.keys(value);return new vm.SyntheticModule(keys,function(){for(const k of keys)this.setExport(k,k==='default'?value:value[k]);},{context});});await mod.evaluate();
@@ -305,6 +313,8 @@ test('synthetic private-store permissions: repository API never traverses privat
  const publicLayout=(root,env)=>{const a=credentialLayout(root,env),b=repositoryLayout(root,env);assert.deepEqual(a,b);return a;};
  const env={DEVELOPER_CREDENTIALS_DIR:legacy+'/credentials',GITHUB_GATEWAY_CREDENTIALS_ROOT:legacy+'/gateway'};
  const before=[store,base,base+'/credentials',base+'/workspace'].map(p=>{const s=native.statSync(p);return[s.ino,s.mode,s.uid,s.gid];});
+ for(const p of safeAncestors){assert.equal(facade.lstatSync(p).uid,0);assert.equal(facade.lstatSync(p).gid,0);}
+ for(const p of roleDirectories){assert.equal(facade.lstatSync(p).uid,10001);assert.equal(facade.lstatSync(p).gid,10001);}
  assert.throws(()=>full(root,env),e=>e.code==='EACCES');accesses.length=0;
  for(let i=0;i<2;i++){const p=publicLayout(root,env);assert.equal(p.workspace,base+'/workspace');assert.equal(p.home,store+'/host-operator');}
  assert(!accesses.some(p=>p===store||p.startsWith(store+'/')||p===legacy||p.startsWith(legacy+'/')));
@@ -312,6 +322,7 @@ test('synthetic private-store permissions: repository API never traverses privat
  for(const key of ['DISPATCHER_CREDENTIALS_DIR','DEVELOPER_CREDENTIALS_DIR','REVIEWER_CREDENTIALS_DIR','DISPATCHER_WORKSPACE','DEVELOPER_WORKSPACE','REVIEWER_WORKSPACE','GITHUB_GATEWAY_RUNTIME_DIR','GITHUB_GATEWAY_CREDENTIALS_ROOT'])for(const p of [base,base+'/workspace/nested',store+'/host-operator',store+'/host-operator/child',store+'/host-operator.img',store+'/host-operator.img/child',root])assert.throws(()=>publicLayout(root,{[key]:p}));
  for(const p of [root+'/../runtime',root+'/',root+'//child','relative','/workspace/fixture/root','/etc/fixture/root'])assert.throws(()=>publicLayout(p,{}));
  for(const p of [base,base+'/credentials',base+'/workspace'])for(const fields of [{uid:12345},{gid:12345},{mode:0o40777}]){badPath=p;bad=fields;assert.throws(()=>publicLayout(root,{}));}badPath=root;for(const fields of [{uid:12345},{mode:0o40777}]){bad=fields;assert.throws(()=>publicLayout(root,{}));}badPath=null;
+ for(const p of safeAncestors){if(p==='/')continue;badPath=p;bad={uid:12345};assert.equal(facade.lstatSync(p).uid,12345);assert.throws(()=>publicLayout(root,{}));}badPath=null;
  native.writeFileSync(base+'/foreign','sentinel');assert.throws(()=>publicLayout(root,{}));native.unlinkSync(base+'/foreign');
  for(const p of [base+'/workspace',base+'/credentials']){native.renameSync(p,p+'-saved');native.symlinkSync(p+'-saved',p);assert.throws(()=>publicLayout(root,{}));native.unlinkSync(p);native.renameSync(p+'-saved',p);}
  native.symlinkSync(root,root+'-alias');assert.throws(()=>publicLayout(root+'-alias',{}));
