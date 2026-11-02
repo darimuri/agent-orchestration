@@ -119,6 +119,11 @@ export function validateService(values, invocationId, pid, cgroup) {
   if (!/^[a-f0-9]{32}$/.test(invocationId ?? '') || values.InvocationID !== invocationId || values.MainPID !== String(pid) || !/^\/user.slice\/user-1000.slice\/user@1000.service\/(?:[A-Za-z0-9_.@-]+\/)*host-operator.service$/.test(values.ControlGroup) || cgroup !== '0::' + values.ControlGroup + '/supervisor\n') deny();
   return values.ControlGroup;
 }
+export async function createWorkerInput({ runId, requestHash, intentDigest, startedAt }) {
+  // Called by service only after validate(true) has verified the installed closure.
+  const { canonicalEvidence } = await import(new URL('../../host-operator-auth/revision-evidence.mjs', import.meta.url));
+  return canonicalEvidence({ sourceDirectory: ROOT + '/source', uid: 1000, source, runId, requestHash, intentDigest, startedAt });
+}
 async function service() {
   const c = validate(true), invocationId = process.env.INVOCATION_ID;
   const attemptStat = fs.lstatSync(ROOT + '/control/attempt.json');
@@ -132,7 +137,7 @@ async function service() {
   const { createCgroupRevisionSupervisor } = await import(pathToFileURL(install + '/agents/host-operator-auth/cgroup-revision-supervisor.mjs'));
   const backend = createCgroupRevisionSupervisor({ uid: 1000, unitName: UNIT, invocationId, controlGroup: v.ControlGroup, cgroupMount: '/sys/fs/cgroup', controlDirectory: ROOT + '/control', sourceDirectory: ROOT + '/source', source, clockId: 'a17-disposable-clock', runtimePath: runtime, runtimeDigest: RUNTIME_DIGEST, workerPath: install + '/agents/host-operator-auth/supervised-revision-worker.mjs', workerDigest: c.workerDigest, helperPath: ROOT + '/native/revision-supervisor', helperDigest: c.helperDigest, managerPath: manager, managerDigest: c.managerDigest, managerEnvironment: { ...environment } });
   const startedAt = Date.now(), runId = 'a17-disposable-run', requestHash = hash('a17-test-request'), intentDigest = hash('a17-test-intent');
-  const answer = await backend.run({ executable: runtime, entry: install + '/agents/host-operator-auth/supervised-revision-worker.mjs', input: JSON.stringify({ sourceDirectory: ROOT + '/source', uid: 1000, source, runId, requestHash, intentDigest, startedAt }), stdoutLimitBytes: 4096, stderrLimitBytes: 4096, inputLimitBytes: 8192, env: { LANG: 'C.UTF-8', TZ: 'UTC' }, runId, requestHash, intentDigest, workerArtifactDigest: c.workerDigest, clockId: 'a17-disposable-clock', startedAt, deadline: startedAt + 5000, settlementWaitMs: 10000 });
+  const answer = await backend.run({ executable: runtime, entry: install + '/agents/host-operator-auth/supervised-revision-worker.mjs', input: await createWorkerInput({ runId, requestHash, intentDigest, startedAt }), stdoutLimitBytes: 4096, stderrLimitBytes: 4096, inputLimitBytes: 8192, env: { LANG: 'C.UTF-8', TZ: 'UTC' }, runId, requestHash, intentDigest, workerArtifactDigest: c.workerDigest, clockId: 'a17-disposable-clock', startedAt, deadline: startedAt + 5000, settlementWaitMs: 10000 });
   // Raw output/proof is never copied into a journal, reporter or completion claim.
   const settled = answer?.status === 'settled';
   let observed = false;

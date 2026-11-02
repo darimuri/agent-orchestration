@@ -6,7 +6,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { main, launchPlan, parseConfig, parseProperties, validateService, validateUnitAbsence, ROOT, UNIT, PROPERTIES } from '../tests/host-operator/a17-host-entry.mjs';
+import { main, createWorkerInput, launchPlan, parseConfig, parseProperties, validateService, validateUnitAbsence, ROOT, UNIT, PROPERTIES } from '../tests/host-operator/a17-host-entry.mjs';
+import { parseEvidence, canonicalEvidence } from '../host-operator-auth/revision-evidence.mjs';
 const entry = fileURLToPath(new URL('../tests/host-operator/a17-host-entry.mjs', import.meta.url));
 const driver = fileURLToPath(new URL('./test-host-operator-a17-host.sh', import.meta.url));
 const config = () => ({ version: 1, managerDigest: '1'.repeat(64), runnerDigest: '2'.repeat(64), helperDigest: '3'.repeat(64), workerDigest: '4'.repeat(64), files: { 'agents/tests/host-operator/a17-host-entry.mjs': '5'.repeat(64), 'agents/host-operator-auth/cgroup-revision-supervisor.mjs': '6'.repeat(64), 'agents/host-operator-auth/supervised-revision-worker.mjs': '4'.repeat(64) }, baselineEvidenceDigest: '7'.repeat(64) });
@@ -96,4 +97,20 @@ test('shell plan is independent of host Node path, source layout, PATH and ident
   // Identity names are deliberately untrusted presentation; genuine host UID1000
   // acceptance remains owner execution. This test itself runs under the actual UID.
   assert(source.includes('/home/dormael/.local/share/host-operator-a17-disposable/runtime/node'));
+});
+
+test('service worker input is accepted by the actual canonical evidence parser', async () => {
+  const binding = { runId: 'a17-disposable-run', requestHash: '1'.repeat(64), intentDigest: '2'.repeat(64), startedAt: 1800000000000 };
+  const input = await createWorkerInput(binding);
+  const parsed = parseEvidence(input, 8192);
+  assert.deepEqual(parsed, { sourceDirectory: ROOT + '/source', uid: 1000, source: {
+    repository: 'darimuri/agent-orchestration', baseRef: 'main', baseSha: '0ecde076bacecc853ec25eb764bb81d42b56f1ae',
+    workspaceId: 'a17-disposable-fixture', sourceDigest: '7d11a3076f9df12ea9803b12ec886696b9ef9bfc4dfa799a09acf52a47b8daf8'
+  }, ...binding });
+  assert.equal(input, canonicalEvidence(parsed));
+  assert.deepEqual(Object.keys(parsed), Object.keys(parsed).sort());
+  assert.deepEqual(Object.keys(parsed.source), Object.keys(parsed.source).sort());
+  const s = fs.readFileSync(entry, 'utf8');
+  assert(s.includes('input: await createWorkerInput({ runId, requestHash, intentDigest, startedAt })'));
+  assert(!/^import .*host-operator-auth/m.test(s));
 });
