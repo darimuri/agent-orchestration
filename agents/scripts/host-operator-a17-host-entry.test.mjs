@@ -1,0 +1,116 @@
+// Source-only tests. No mode, environment variable or fixture starts a live unit.
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
+import { main, createWorkerInput, launchPlan, parseConfig, parseProperties, validateService, validateUnitAbsence, ROOT, UNIT, PROPERTIES } from '../tests/host-operator/a17-host-entry.mjs';
+import { parseEvidence, canonicalEvidence } from '../host-operator-auth/revision-evidence.mjs';
+const entry = fileURLToPath(new URL('../tests/host-operator/a17-host-entry.mjs', import.meta.url));
+const driver = fileURLToPath(new URL('./test-host-operator-a17-host.sh', import.meta.url));
+const config = () => ({ version: 1, managerDigest: '1'.repeat(64), runnerDigest: '2'.repeat(64), helperDigest: '3'.repeat(64), workerDigest: '4'.repeat(64), files: { 'agents/tests/host-operator/a17-host-entry.mjs': '5'.repeat(64), 'agents/host-operator-auth/cgroup-revision-supervisor.mjs': '6'.repeat(64), 'agents/host-operator-auth/supervised-revision-worker.mjs': '4'.repeat(64) }, baselineEvidenceDigest: '7'.repeat(64) });
+const encode = c => Buffer.from(JSON.stringify(c) + '\n');
+test('planning has no host admission or side effects and returns exact direct argv', async () => {
+  const r = await main(['--plan']); assert.equal(r.status, 'NO_ACTION'); assert.equal(r.hostAcceptance, 'NOT_READY');
+  const p = launchPlan(); assert.equal(p.unit, UNIT); assert.equal(p.command, '/usr/bin/systemd-run');
+  assert.deepEqual(p.argv.slice(-4), ['--', ROOT + '/runtime/node', ROOT + '/install/agents/tests/host-operator/a17-host-entry.mjs', '--service']);
+  for (const [k, v] of Object.entries(PROPERTIES)) assert(p.argv.includes('--property=' + k + '=' + v));
+  assert.equal(PROPERTIES.Restart, 'no'); assert.equal(PROPERTIES.DelegateSubgroup, 'supervisor');
+  assert.equal(PROPERTIES.KillMode, 'control-group');
+  assert(!p.argv.some(a => /enable|restart|PIDFile|socket|bash/.test(a)));
+  assert.deepEqual(Object.keys(p.environment).sort(), ['DBUS_SESSION_BUS_ADDRESS', 'LANG', 'TZ', 'XDG_RUNTIME_DIR']);
+  p.argv.push('bad'); assert(!launchPlan().argv.includes('bad'));
+});
+test('canonical bounded immutable config accepts only the fixed inventory schema', () => {
+  assert.deepEqual(parseConfig(encode(config())), config());
+  for (const key of Object.keys(config())) { const c = config(); delete c[key]; assert.throws(() => parseConfig(encode(c))); }
+  for (const key of ['command', 'argv', 'env', 'mount', 'unitName', 'path', 'kernel', 'verified']) { const c = config(); c[key] = 'canary'; assert.throws(() => parseConfig(encode(c))); }
+  for (const name of ['../outside', '/etc/passwd', 'agents/../outside', 'agents/a/../../x', 'agents/a\nfile', 'agents/a//file']) { const c = config(); c.files[name] = 'a'.repeat(64); assert.throws(() => parseConfig(encode(c))); }
+  for (const key of ['managerDigest', 'runnerDigest', 'helperDigest', 'workerDigest', 'baselineEvidenceDigest']) { const c = config(); c[key] = 'bad'; assert.throws(() => parseConfig(encode(c))); }
+  assert.throws(() => parseConfig(Buffer.from('{"version":1,"version":2}\n')));
+  assert.throws(() => parseConfig(Buffer.concat([Buffer.from([0xef, 0xbb, 0xbf]), encode(config())])));
+  assert.throws(() => parseConfig(Buffer.from([255]))); assert.throws(() => parseConfig(Buffer.alloc(1048577)));
+  assert.throws(() => parseConfig(Buffer.from(JSON.stringify(config(), null, 2))));
+});
+test('actual invocation binding rejects sibling units, manager mismatch and unsealed placement', () => {
+  const group = '/user.slice/user-1000.slice/user@1000.service/app.slice/host-operator.service';
+  const id = 'a'.repeat(32), values = { InvocationID: id, ControlGroup: group, MainPID: '1234' };
+  assert.equal(validateService(values, id, 1234, '0::' + group + '/supervisor\n'), group);
+  for (const [k, v] of [['InvocationID', 'b'.repeat(32)], ['MainPID', '1'], ['ControlGroup', group + '-other'], ['ControlGroup', '/other/host-operator.service']]) assert.throws(() => validateService({ ...values, [k]: v }, id, 1234, '0::' + group + '/supervisor\n'));
+  for (const cgroup of ['0::' + group + '\n', '0::' + group + '/worker\n', '0::/\n', '']) assert.throws(() => validateService(values, id, 1234, cgroup));
+  assert.throws(() => validateService({ ...values, extra: true }, id, 1234, '0::' + group + '/supervisor\n'));
+});
+test('manager property parser refuses duplicates, malformed and unterminated data', () => {
+  assert.deepEqual(parseProperties('MainPID=42\nControlGroup=/fixed\n'), { MainPID: '42', ControlGroup: '/fixed' });
+  for (const s of ['', 'MainPID=42', 'MainPID=1\nMainPID=2\n', '=x\n', 'bad\n']) assert.throws(() => parseProperties(s));
+});
+test('unknown arguments cannot select requests or execution', async () => {
+  for (const args of [[], ['--plan', '--run-disposable'], ['--start'], ['status.revision'], ['--command=touch'], ['--env=A=1']]) await assert.rejects(main(args));
+});
+test('ordinary source invocation fails closed even with activation environment flags', () => {
+  for (const arg of ['--validate', '--service', '--run-disposable']) {
+    // Wrong fixed process.execPath/source location denies before manager or file writes.
+    const r = spawnSync(process.execPath, [entry, arg], { encoding: 'utf8', env: { LANG: 'C.UTF-8', TZ: 'UTC', HOST_OPERATOR_ACTIVATE: '1', HOST_OPERATOR_TEST_LIVE: '1' }, timeout: 5000 });
+    assert.equal(r.status, 70); assert.equal(r.stdout, ''); assert.deepEqual(JSON.parse(r.stderr), { status: 'UNKNOWN', code: 'a17_host_denied', cleanup: 'OWNER_INSPECTION_REQUIRED', hostAcceptance: 'NOT_READY' });
+  }
+});
+test('shell syntax and negative fixtures never launch a unit', () => {
+  const syntax = spawnSync('/bin/bash', ['-n', driver]); assert.equal(syntax.status, 0);
+  for (const args of [[], ['--service'], ['--plan', 'extra'], ['--command', 'true'], ['--env=LIVE=1']]) {
+    const r = spawnSync('/bin/bash', [driver, ...args], { encoding: 'utf8', env: { LANG: 'C.UTF-8', TZ: 'UTC', HOST_OPERATOR_ACTIVATE: '1' } });
+    assert.equal(r.status, 2); assert.equal(r.stdout, ''); assert.equal(JSON.parse(r.stderr).status, 'NO_ACTION');
+  }
+  const r = spawnSync('/bin/bash', [driver, '--plan'], { encoding: 'utf8', env: { LANG: 'C.UTF-8', TZ: 'UTC', NODE_OPTIONS: '--definitely-invalid-option', HOST_OPERATOR_ACTIVATE: '1' } });
+  assert.equal(r.status, 0, r.stderr); assert.deepEqual(JSON.parse(r.stdout), { status: 'NO_ACTION', plan: launchPlan(), cleanup: 'OWNER_INSPECTION_REQUIRED', hostAcceptance: 'NOT_READY' });
+});
+test('entry imports real backend only after validation and has no runtime fixture facade', () => {
+  const s = fs.readFileSync(entry, 'utf8');
+  assert(!/node:vm|SyntheticModule|runSyntheticSupervisor|kernelFacade/.test(s));
+  assert(s.indexOf('const c = validate(true)') < s.indexOf('await import(pathToFileURL'));
+  assert(!/unlinkSync|rmSync|rmdirSync|sudo|docker|reset-failed/.test(s));
+  assert(s.includes("exclusive('started.json'")); assert(s.includes("exclusive('attempt.json'"));
+});
+
+test('any loaded, installed, failed, inactive retained unit or cgroup collision denies', () => {
+  const empty = { LoadState: 'not-found', ActiveState: 'inactive', UnitFileState: '', FragmentPath: '', ControlGroup: '' };
+  assert.doesNotThrow(() => validateUnitAbsence(empty));
+  for (const [key, value] of [['LoadState', 'loaded'], ['LoadState', 'masked'], ['ActiveState', 'failed'], ['ActiveState', 'active'], ['UnitFileState', 'enabled'], ['UnitFileState', 'static'], ['FragmentPath', '/fixed/unit'], ['ControlGroup', '/existing']]) assert.throws(() => validateUnitAbsence({ ...empty, [key]: value }));
+  assert.throws(() => validateUnitAbsence({ ...empty, MainPID: '0' }));
+});
+
+test('shell plan is independent of host Node path, source layout, PATH and identity environment', t => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'a17-plan-layout-'));
+  t.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
+  const isolated = path.join(tmp, 'driver.sh');
+  fs.copyFileSync(driver, isolated);
+  const source = fs.readFileSync(isolated, 'utf8');
+  assert(!source.includes('/usr/local/'));
+  const planning = source.slice(source.indexOf('if [ "$1" = --plan ]'), source.indexOf('# Host actions'));
+  assert(!/\$\(|^\s*(?:exec|node|env|dirname|pwd)\s/m.test(planning));
+  for (const user of ['dormael', 'agent', 'root']) {
+    const r = spawnSync('/bin/bash', ['--noprofile', '--norc', isolated, '--plan'], { encoding: 'utf8', env: { PATH: '/no-runtime-or-tools', USER: user, LOGNAME: user, HOME: '/nonexistent-home', NODE_OPTIONS: '--definitely-invalid-option', NODE: '/not-a-node', HOST_OPERATOR_ACTIVATE: '1', HOST_OPERATOR_TEST_LIVE: '1' }, timeout: 5000 });
+    assert.equal(r.status, 0, r.stderr); assert.equal(r.stderr, '');
+    assert.deepEqual(JSON.parse(r.stdout), { status: 'NO_ACTION', plan: launchPlan(), cleanup: 'OWNER_INSPECTION_REQUIRED', hostAcceptance: 'NOT_READY' });
+  }
+  // Identity names are deliberately untrusted presentation; genuine host UID1000
+  // acceptance remains owner execution. This test itself runs under the actual UID.
+  assert(source.includes('/home/dormael/.local/share/host-operator-a17-disposable/runtime/node'));
+});
+
+test('service worker input is accepted by the actual canonical evidence parser', async () => {
+  const binding = { runId: 'a17-disposable-run', requestHash: '1'.repeat(64), intentDigest: '2'.repeat(64), startedAt: 1800000000000 };
+  const input = await createWorkerInput(binding);
+  const parsed = parseEvidence(input, 8192);
+  assert.deepEqual(parsed, { sourceDirectory: ROOT + '/source', uid: 1000, source: {
+    repository: 'darimuri/agent-orchestration', baseRef: 'main', baseSha: '0ecde076bacecc853ec25eb764bb81d42b56f1ae',
+    workspaceId: 'a17-disposable-fixture', sourceDigest: '7d11a3076f9df12ea9803b12ec886696b9ef9bfc4dfa799a09acf52a47b8daf8'
+  }, ...binding });
+  assert.equal(input, canonicalEvidence(parsed));
+  assert.deepEqual(Object.keys(parsed), Object.keys(parsed).sort());
+  assert.deepEqual(Object.keys(parsed.source), Object.keys(parsed.source).sort());
+  const s = fs.readFileSync(entry, 'utf8');
+  assert(s.includes('input: await createWorkerInput({ runId, requestHash, intentDigest, startedAt })'));
+  assert(!/^import .*host-operator-auth/m.test(s));
+});
