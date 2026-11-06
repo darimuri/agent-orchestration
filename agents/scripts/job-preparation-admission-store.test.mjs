@@ -86,6 +86,101 @@ if (process.argv[2] === '--fixture-worker') {
     assert.equal(f.store.reserve(second).token, undefined); assert.equal(phase(f.store.submit(proposal({ requestId: second }))), 'expired'); assert.equal(phase(await f.store.decide(second, 'reject')), 'expired');
   });
 
+  // Exercise the actual store, using the same explicitly simulated root metadata.
+  // Ordinary denial must leave both the live instance and a fresh one usable.
+  function unrelatedProgress(f, now = epoch) {
+    for (const [store, rid] of [[f.store, '2'.repeat(32)], [createAdmissionStore(f.options), '3'.repeat(32)]]) {
+      const result = store.submit(proposal({ requestId: rid, approvalExpiresAt: new Date(now + 10000).toISOString(), jobExpiresAt: new Date(now + 20000).toISOString() }));
+      assert.equal(result.phase, 'pending'); assert(!fs.existsSync(path.join(f.directory, 'admission.lock')));
+    }
+  }
+
+  for (const [name, change] of [
+    ['expired approval', { approvalExpiresAt: new Date(epoch).toISOString() }],
+    ['expired job', { approvalExpiresAt: new Date(epoch - 1).toISOString(), jobExpiresAt: new Date(epoch).toISOString() }],
+    ['overlong approval', { approvalExpiresAt: new Date(epoch + 10001).toISOString() }],
+    ['overlong job', { jobExpiresAt: new Date(epoch + 20001).toISOString() }],
+  ]) test('R2: new ' + name + ' denies without acquiring a lock; unrelated IDs progress', t => {
+    const f = fixture(t), original = fs.openSync; let lockAttempts = 0;
+    mock.method(fs, 'openSync', (...args) => { if (args[0] === path.join(f.directory, 'admission.lock') && (args[1] & fs.constants.O_CREAT)) lockAttempts++; return original(...args); });
+    assert.equal(f.store.submit(proposal(change)).phase, 'denied'); assert.equal(lockAttempts, 0); assert.equal(count(f.directory), 0); assert.equal(f.calls(), 0);
+    unrelatedProgress(f); assert.equal(f.store.inspect(id).phase, 'absent');
+  });
+
+  test('R2: malformed new proposal has no lock or store effect', t => {
+    const f = fixture(t), original = fs.openSync; let lockAttempts = 0;
+    mock.method(fs, 'openSync', (...args) => { if (args[0] === path.join(f.directory, 'admission.lock')) lockAttempts++; return original(...args); });
+    assert.throws(() => f.store.submit(proposal({ approvalExpiresAt: 'invalid' })), /admission_denied/);
+    assert.equal(lockAttempts, 0); assert.equal(count(f.directory), 0); unrelatedProgress(f);
+  });
+
+  for (const now of [epoch + 10000, epoch + 20000]) test('R2: approved then expired reserve preserves immutable approval and releases its owned lock at ' + now, async t => {
+    const f = fixture(t); f.store.submit(proposal()); const approved = await f.store.decide(id, 'approve'); assert.equal(approved.phase, 'approved');
+    const files = fs.readdirSync(f.directory).map(name => [name, fs.readFileSync(path.join(f.directory, name), 'utf8')]);
+    f.setTime(now); const result = f.store.reserve(id); assert.deepEqual(result, approved); assert.equal(result.token, undefined);
+    assert.deepEqual(fs.readdirSync(f.directory).map(name => [name, fs.readFileSync(path.join(f.directory, name), 'utf8')]), files);
+    assert.equal(f.calls(), 1); assert.deepEqual(f.store.inspect(id), approved); assert.deepEqual(createAdmissionStore(f.options).inspect(id), approved);
+    unrelatedProgress(f, now); assert.deepEqual(f.store.inspect(id), approved);
+  });
+
+  test('R2: expiry between submit precheck and lock acquisition takes normal verified release', t => {
+    const f = fixture(t), open = fs.openSync, unlink = fs.unlinkSync, lock = path.join(f.directory, 'admission.lock'); let acquired = 0, released = 0;
+    mock.method(fs, 'openSync', (...args) => { if (args[0] === lock && (args[1] & fs.constants.O_CREAT)) { acquired++; f.setTime(epoch + 10000); } return open(...args); });
+    mock.method(fs, 'unlinkSync', (...args) => { if (args[0] === lock) released++; return unlink(...args); });
+    assert.equal(f.store.submit(proposal()).phase, 'denied'); assert.equal(acquired, 1); assert.equal(released, 1); assert.equal(count(f.directory), 0); assert.equal(f.calls(), 0);
+    unrelatedProgress(f, epoch + 10000);
+  });
+
+  test('R2: expiry immediately before first intent record is ordinary denial', t => {
+    let calls = 0; const f = fixture(t, { clock: () => ++calls >= 3 ? epoch + 10000 : epoch });
+    assert.equal(f.store.submit(proposal()).phase, 'denied'); assert.equal(count(f.directory), 0); assert.equal(f.calls(), 0); unrelatedProgress(f, epoch + 10000);
+  });
+
+  test('R2: reserve expiry immediately before first candidate returns historical approval, no token', async t => {
+    let reserving = false, calls = 0; const f = fixture(t, { clock: () => reserving && ++calls >= 2 ? epoch + 10000 : epoch });
+    f.store.submit(proposal()); const approved = await f.store.decide(id, 'approve'); reserving = true;
+    assert.deepEqual(f.store.reserve(id), approved); assert.equal(count(f.directory), 4); assert(!fs.existsSync(path.join(f.directory, 'admission.lock')));
+    unrelatedProgress(f, epoch + 10000);
+  });
+
+  for (const action of ['submit', 'reserve']) test('R2: ' + action + ' expiry after a candidate preserves genuine partial evidence', async t => {
+    let enabled = false, calls = 0; const threshold = action === 'submit' ? 4 : 3;
+    const f = fixture(t, { clock: () => enabled && ++calls >= threshold ? epoch + 10000 : epoch });
+    if (action === 'reserve') { f.store.submit(proposal()); await f.store.decide(id, 'approve'); }
+    enabled = true;
+    const result = action === 'submit' ? f.store.submit(proposal()) : f.store.reserve(id), kind = action === 'submit' ? 'intent' : 'reservation';
+    assert.equal(result.phase, 'outcome_unknown'); assert.equal(result.token, undefined); assert(fs.existsSync(path.join(f.directory, id + '.' + kind + '.candidate')));
+    assert(!fs.existsSync(path.join(f.directory, id + '.' + kind + '.json'))); assert(fs.existsSync(path.join(f.directory, 'admission.lock')));
+    const before = fs.readdirSync(f.directory); assert.equal(createAdmissionStore(f.options).inspect(id).phase, 'outcome_unknown');
+    assert.equal(f.store.submit(proposal({ requestId: '2'.repeat(32), approvalExpiresAt: new Date(epoch + 20000).toISOString(), jobExpiresAt: new Date(epoch + 30000).toISOString() })).phase, 'outcome_unknown');
+    assert.deepEqual(fs.readdirSync(f.directory), before);
+  });
+
+  test('R2: release fsync failure during normal expired reserve remains uncertain after restart', async t => {
+    const f = fixture(t); f.store.submit(proposal()); await f.store.decide(id, 'approve'); f.setTime(epoch + 10000);
+    const original = fs.fsyncSync; let calls = 0; mock.method(fs, 'fsyncSync', (...args) => { if (++calls === 3) throw Error('release sync fault'); return original(...args); });
+    assert.equal(f.store.reserve(id).phase, 'outcome_unknown'); assert(fs.existsSync(path.join(f.directory, 'admission.uncertain'))); assert(!fs.existsSync(path.join(f.directory, id + '.reservation.candidate')));
+    assert.equal(createAdmissionStore(f.options).inspect(id).phase, 'outcome_unknown');
+  });
+
+  test('R2: unowned lock stays unknown even for an invalid lifetime', t => {
+    const f = fixture(t), lock = path.join(f.directory, 'admission.lock'); fs.writeFileSync(lock, 'unowned evidence', { mode: 0o600 });
+    assert.equal(f.store.submit(proposal({ approvalExpiresAt: new Date(epoch).toISOString() })).phase, 'outcome_unknown');
+    assert.equal(fs.readFileSync(lock, 'utf8'), 'unowned evidence'); assert.equal(count(f.directory), 1);
+    assert.equal(createAdmissionStore(f.options).submit(proposal({ requestId: '2'.repeat(32) })).phase, 'outcome_unknown');
+    assert.equal(fs.readFileSync(lock, 'utf8'), 'unowned evidence');
+  });
+
+  test('R2: substituted lock during normal expired reserve is preserved, never released', async t => {
+    let sabotage = false, time = epoch, directory; const f = fixture(t, { clock: () => {
+      if (sabotage) { sabotage = false; const lock = path.join(directory, 'admission.lock'); fs.unlinkSync(lock); fs.writeFileSync(lock, 'unowned substitution', { mode: 0o600 }); }
+      return time;
+    } }); directory = f.directory;
+    f.store.submit(proposal()); await f.store.decide(id, 'approve'); time = epoch + 10000; sabotage = true;
+    assert.equal(f.store.reserve(id).phase, 'outcome_unknown'); assert.equal(fs.readFileSync(path.join(directory, 'admission.lock'), 'utf8'), 'unowned substitution'); assert.equal(count(directory), 5);
+    assert.equal(createAdmissionStore(f.options).inspect(id).phase, 'outcome_unknown');
+  });
+
   test('authority failure/cancellation/timeout cannot publish a decision and holds no lock', async t => {
     const f = fixture(t); f.store.submit(proposal());
     for (const fn of [() => { throw Error('private'); }, () => Promise.reject(Error('cancelled')), () => new Promise(() => {})]) {

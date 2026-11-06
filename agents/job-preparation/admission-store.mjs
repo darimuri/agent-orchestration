@@ -89,11 +89,22 @@ function buildAdmissionStore(input) {
     for (const state of states.values()) if (state.reservation && (!state.decision || state.decision.payload.phase !== 'approved' || state.reservation.payload.decisionReceiptId !== state.decision.receiptId || state.reservation.payload.at < state.decision.payload.at || state.reservation.payload.at >= Math.min(timestamp(state.intent.payload.approvalExpiresAt), timestamp(state.intent.payload.jobExpiresAt)))) deny();
     guard(); return states;
   }
+  // This pure check has no I/O/authority callbacks. Only lifetime rejection is
+  // ordinary denial; guard, clock and storage failures still escape to unknown.
+  function lifetimeAllowed(intent, n) {
+    try { checkLifetime(intent, n); return true; } catch { return false; }
+  }
   function publish(id, kind, intentDigest, payload, check = () => {}) {
     const body = { version: 1, kind, requestId: id, intentDigest, receiptId: randomBytes(16).toString('hex'), payload };
     const record = { ...body, checksum: digest(body) }, bytes = Buffer.from(canonical(record)); if (bytes.length > MAX_RECORD) deny();
     for (const candidate of [true, false]) {
-      check(); guard(); const target = file(id, kind, candidate), fd = fs.openSync(target, fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL | fs.constants.O_NOFOLLOW, 0o600);
+      if (check() === false) {
+        // No record exists yet: the caller may return normal denial and release
+        // its verified lock. After candidate creation, preserve partial evidence.
+        if (candidate) return null;
+        deny();
+      }
+      guard(); const target = file(id, kind, candidate), fd = fs.openSync(target, fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL | fs.constants.O_NOFOLLOW, 0o600);
       let created;
       try { created = identity(fs.fstatSync(fd)); let offset = 0; while (offset < bytes.length) { const n = fs.writeSync(fd, bytes, offset, bytes.length - offset, offset); if (!Number.isInteger(n) || n <= 0 || n > bytes.length - offset) deny(); offset += n; } fs.fsyncSync(fd); if (identity(fs.fstatSync(fd)) !== created) deny(); }
       finally { fs.closeSync(fd); }
@@ -146,11 +157,20 @@ function buildAdmissionStore(input) {
   const submit = raw => {
     // Validate before acquiring anything: hostile input never creates files.
     const intent = canonicalIntent(raw, policy), id = intent.requestId;
+    if (poisoned) return unknown();
+    try {
+      guard(); if (!missing(lock)) return unknown(); const n = now();
+      // Existing IDs must retain immutable replay/conflict semantics even after
+      // expiry. Absence is only a precheck; the lock reobserves both ID and time.
+      if (missing(file(id, 'intent')) && !lifetimeAllowed(intent, n)) return Object.freeze({ phase: 'denied' });
+    } catch { return unknown(); }
     return locked(inv => {
       const n = now(), prior = inv.get(id);
       if (prior) { if (canonical(prior.intent.payload) !== canonical(intent)) return Object.freeze({ phase: 'conflict' }); return observation(prior); }
-      checkLifetime(intent, n); if (inv.size >= MAX_INTENTS) return Object.freeze({ phase: 'capacity' });
-      return observation({ intent: publish(id, 'intent', digest(intent), intent) });
+      if (!lifetimeAllowed(intent, n)) return Object.freeze({ phase: 'denied' });
+      if (inv.size >= MAX_INTENTS) return Object.freeze({ phase: 'capacity' });
+      const record = publish(id, 'intent', digest(intent), intent, () => lifetimeAllowed(intent, now()));
+      return record ? observation({ intent: record }) : Object.freeze({ phase: 'denied' });
     });
   };
   async function decide(id, decision) {
@@ -189,12 +209,13 @@ function buildAdmissionStore(input) {
     const result = locked(inv => {
       const state = inv.get(id); if (!state) return Object.freeze({ phase: 'absent' }); const n = now(); expire(state, n);
       if (state.reservation || state.decision?.payload.phase !== 'approved') return observation(state);
-      checkLifetime(state.intent.payload, n);
-      state.reservation = publish(id, 'reservation', state.intent.intentDigest, { phase: 'reserved', at: n, decisionReceiptId: state.decision.receiptId }, () => {
-        const t = now(); guard(); checkLifetime(state.intent.payload, t);
+      if (!lifetimeAllowed(state.intent.payload, n)) return observation(state);
+      const reservation = publish(id, 'reservation', state.intent.intentDigest, { phase: 'reserved', at: n, decisionReceiptId: state.decision.receiptId }, () => {
+        const t = now(); guard(); if (!lifetimeAllowed(state.intent.payload, t)) return false;
         if (canonical(read(file(id, 'intent')).value) !== canonical(state.intent) || canonical(read(file(id, 'decision')).value) !== canonical(state.decision)) deny();
       });
-      token = Object.freeze(Object.create(null)); return observation(state);
+      if (!reservation) return observation(state);
+      state.reservation = reservation; token = Object.freeze(Object.create(null)); return observation(state);
     });
     return result.phase === 'reserved' && token ? Object.freeze({ ...result, token }) : result;
   }
