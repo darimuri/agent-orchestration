@@ -1617,3 +1617,147 @@ reset namespaces or re-admit to conceal UNKNOWN. Shared-UID mutation/ABA, import
 artifact TOCTOU, manager liveness, D-state, storage/quota/power-loss and service-stop
 races remain host gates. Native reporting/bootstrap/activation/broader operations,
 #21 isolation and Gateway#11 are excluded; H1–H9 live remain NOT_READY.
+
+## Pre-job admission core: source only
+
+`job-preparation/intent.mjs` and `job-preparation/admission-store.mjs` add an
+independent canonical pre-job journal. They do not invoke the Host Operator,
+legacy workspace provisioner or Gateway. Nothing imports them at startup. This
+phase neither prepares a workspace nor creates an active job. Source merge has no
+host activation effect.
+
+The fixed policy is an exact data object with `version:1`, `ownerId`,
+`developerAgentId`, `repository`, `baseRef`, `baseSha`, `policyVersion`,
+`capabilityProfileVersion`, `capabilityProfileDigest`, `slotNamespace`,
+`approvalLifetimeMs`, `jobLifetimeMs`, and `authorityTimeoutMs`. Lifetimes are
+positive integral milliseconds, at most seven days; approval lifetime cannot
+exceed job lifetime; authority timeout is at most sixty seconds. Profile digest
+is SHA256 of canonical `{version:capabilityProfileVersion,role:"developer",
+capabilities:DEVELOPER_CAPABILITIES}`. The exported ordered list is the actual
+Developer role scope: repository read; PR read/create/update/Ready; branch commit
+create; issue list/search/read/create/update/comment/state. This accurately
+includes existing PR Ready capability without changing this job's instruction
+that only the owner may authorize its eventual Ready transition. Approval cannot
+select a narrower profile or add a capability.
+
+The downstream source contract was read at Gateway reviewed commit
+`e356f86661c966660549648a4416f9fae6fd9854`, tree
+`24e0b0b79712d74d56a9231be056a2fef539370b` (`src/jobs.ts` and
+`src/job-provision-writer.ts`). That is the same tree as the owner-reported merge
+pin `6b32223b307c295bd4ee9ad45c9797a39db594af`; the merge object itself was not
+available in the read-only projection. Job/Developer agent IDs use its exact
+`^[a-z0-9][a-z0-9._-]{0,63}$` grammar. No Gateway source was changed or tested by
+this admission-only phase, and no cross-system atomicity is claimed.
+
+`canonicalIntent(raw, policy)` accepts only a JSON string or UTF-8 Buffer, at most
+4096 bytes and depth one. The exact keys are `version:1`, `requestId` (32 lowercase
+hex), `jobId`, `repository`, `baseRef`, `baseSha` (40 lowercase hex),
+`approvalExpiresAt`, `jobExpiresAt`, `taskId`, `assignmentId`, `channelId` (UUID),
+and `threadId` (64 lowercase hex). Deadlines must be valid canonical millisecond
+UTC ISO strings; approval must not outlive the job. Task/assignment identifiers
+are bounded alphanumeric/underscore/hyphen strings. Unknown/duplicate decoded
+keys, nested values, BOM, invalid UTF-8, malformed Unicode and caller-selected
+identity/role/profile/path/env/command/URL/authority are rejected. Submitted
+repo/ref/SHA must equal fixed policy. The full canonical intent binds the
+proposal, fixed owner/Developer/policy/profile, exact operation
+`prepare_developer_job_v1`, logical slot `slotNamespace:requestId`, both deadlines
+and all context IDs. Proposer identity is explicitly `unverified`; shared UID or
+Buzz context never supplies identity. The summary is structured data, never HTML,
+a constructed URL or a path; a later renderer must escape it as text.
+
+The private API is `createAdmissionStore({directory,policy,clock,
+decisionAuthority})` returning `submit(raw)`, `inspect(requestId)`,
+`decide(requestId,"approve"|"reject")`, and `reserve(requestId)`. There is no
+public CLI/socket/RPC. Keep the store object and especially `reserve` inside a
+future trusted executor composition. Neither submission nor inspection grants
+authority; inspection performs no writes or expiry transitions. Exact ID+intent
+replay observes the original receipts; changed reuse conflicts. Results use
+`absent`, `pending`, `approved`, `rejected`, `expired`, `reserved`, `conflict`,
+`capacity`, `denied` or `outcome_unknown`; malformed proposal/decision/reservation ID and
+constructor configuration throw fixed `admission_denied` errors. Inspection returns unknown for a malformed ID.
+
+`clock()` is mandatory and returns a nonnegative safe integral epoch millisecond
+value; each store instance rejects regressions. Trusted nonregressing time across
+process restarts remains a host requirement. `decisionAuthority` is a mandatory
+async in-process trusted port, never supplied by a proposal. It receives a frozen
+exact `{requestId,intentDigest,decision,ownerId,policyDigest}` binding and an
+AbortSignal. It must authenticate the current owner against that exact binding,
+perform fresh decision-specific authentication, and return that binding plus
+`authorityId`, `authorizedAt`, `validUntil`, and synchronous `stillValid()`.
+Authorized time cannot precede the attempt or exceed current time; validity must
+be current and no later than either deadline. `stillValid()` must return exactly
+`true` while the actual authenticated sender/owner/policy/decision remain current;
+a Promise or serializable boolean/subject/receipt is not authority. The future
+adapter must retain actual sd-bus unique sender/Polkit cancellation semantics.
+The core authenticates without holding a store lock, then rechecks binding,
+clock/deadlines, pending state, fixed configuration, exact persisted intent and
+continuity before the create-only decision. Timeout/error aborts or denies without
+a decision. Late authorization loses to server-derived expiry. Expiry is never a
+caller-selected decision. Duplicate matching terminal decisions observe historical
+receipts without fresh authentication; conflicting terminal decisions cannot
+change history. Historical approval is not fresh Polkit evidence.
+
+The only state transitions are pending to approved/rejected/expired and approved
+to reserved. Reservation rechecks both original deadlines and current fixed
+policy. Only its single winner receives an opaque empty instance-local token;
+inspection, duplicate reservation and restart never reproduce it. The token is
+not prepared evidence, a Gateway receipt, a restart adoption capability or
+permission to execute. Reject/expiry perform zero provisioning, cancellation or
+job deletion. Future staged/workspace-prepared-inactive/job-committing/completed/
+committed-unconfirmed states remain unimplemented.
+
+The production constructor requires Linux/root and a **preexisting** private
+root-owned0700 canonical directory, with root-owned protected nonsymlink
+ancestors (no writable/sticky temporary ancestor exception). It creates no
+directory and never chowns/repairs storage. Directory identities are anchored by
+device/inode/owner/mode; unrelated child directory creation does not change those
+identities. Every record/lock must be root-owned0600, ordinary, single-link,
+bounded and opened with O_NOFOLLOW. There is no public UID/fs override. Tests
+simulate root metadata and authority explicitly while doing real unprivileged
+temporary-filesystem I/O; they establish no live root custody, sender, TTY,
+Polkit or privilege evidence.
+
+A single nonwaiting exclusive store lock serializes inventory, same-ID capacity,
+decisions, expiry and reservation across instances/processes. Authentication holds
+no lock. Contention returns unknown without retry or stale-lock adoption. Under
+that lock each intent/decision/reservation publishes a retained checksummed
+candidate and a separate create-only final record using O_EXCL, file fsync,
+parent-directory fsync and identity/byte readback. It never relies on an
+overwriting rename as CAS. Short writes are bounded by the remaining byte count;
+zero writes, partial candidates/finals, unexpected names, inconsistent pairs,
+unsafe custody or readback/sync/release failures fail closed and preserve evidence.
+Only the same live operation's verified named/open lock may be unlinked. A release-sync failure additionally attempts a create-only `admission.uncertain` quarantine marker; that unexplained evidence disables restart authority. The marker is best-effort under complete storage failure, which remains a host durability gate. Unknown
+publication poisons the instance; an existing lock or unexplained evidence blocks
+restart authority. There is no recovery/GC/eviction/reset, rollback of records or
+automatic retry. A durable decision followed by a lost reply is historical state,
+not proof of fresh authentication. A reserved record after restart is observe-only
+for execution.
+
+Capacity is 4096 immutable intents, with at most six 8192-byte record files per
+intent plus one live lock (about192MiB worst-case record bytes). Full bounded
+inventory is intentionally conservative; capacity is checked after reobserving
+under the lock, and same-ID duplicates consume no new slot. The filesystem must
+honor exclusive creation, stable protected directory identities and file/directory
+fsync. Root-custodian interference, storage durability/quota, power-loss behavior
+and trusted restart time are separate host acceptance requirements; fixture tests
+cannot establish them.
+
+Validation includes full-capacity and same/changed-ID multiprocess races,
+approve/reject/expire and reservation races, late/failed/cancelled authority,
+forged bindings, config/clock/intent drift, substituted/unowned locks, unsafe
+metadata/links/partial records, short/zero writes/ENOSPC, fsync/CAS/readback/release
+faults and SIGKILL around candidate/final publication. Run the complete existing
+Node suites plus documented shell fixtures; native compiler, Docker, sudo and
+host-only acceptance prerequisites must be reported as missing when unavailable.
+No source-only test substitutes for actual D-Bus/Polkit/SSH controlling TTY and
+pkttyagent, fresh non-keep approve/reject prompts, protected installed code/config,
+credential-free managed workspace worker, workspace-first/job-last publication,
+approved+prepared delivery, pinned all-writer Gateway cutover, or live H1-H9 gates.
+
+Before installation, rollback is a human-reviewed source revert in a separately
+scoped PR. Future installed rollback must stop new admissions and retain all
+canonical decisions, reservations and uncertain evidence for explicit
+reconciliation; it must never delete stores/locks/jobs, revive rejected/expired
+IDs, replay a reserved effect or restore an uncoordinated old writer. This unit
+provides no browser approval links, D-Bus/Polkit adapter, CLI, root executor,
+managed workspace implementation, public Gateway API or live cutover.
