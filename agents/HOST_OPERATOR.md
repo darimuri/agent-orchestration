@@ -1761,3 +1761,103 @@ reconciliation; it must never delete stores/locks/jobs, revive rejected/expired
 IDs, replay a reserved effect or restore an uncoordinated old writer. This unit
 provides no browser approval links, D-Bus/Polkit adapter, CLI, root executor,
 managed workspace implementation, public Gateway API or live cutover.
+
+## Native owner-decision authority primitive (source only)
+
+`job-preparation/native/host-approval-dbus.{h,c}` adds a private C/libsystemd
+library, with the inert `org.buzz.HostApproval1.xml` contract. The only custom
+public methods are `Inspect(s)->(sss)` and `Decide(ss)->(ss)` on service/interface
+`org.buzz.HostApproval1`, object `/org/buzz/HostApproval1`. No public Submit,
+Authorize, Grant or Reserve exists. This increment has no daemon entrypoint,
+activation/policy/rules/unit, CLI/agent, browser, addon, private JS bridge,
+admission journal access or workspace/Git/Gateway/job effect.
+
+An explicit future trusted composition calls `ha_server_new(config,core,&server)`.
+Production construction uses only the fixed local system broker address and
+ignores inherited DBUS_* transport settings. Config privately fixes a nonroot
+owner UID (shared agent UID10001 is forbidden in production), ownerId,
+policyDigest, 1..60000ms timeout and trusted nonregressing epoch clock. Core
+callbacks receive opaque native calls and produce bounded replies through
+`ha_call_reply`. Inspect is owner-only and performs no authentication or write;
+its summary is at most16KiB and must be rendered as escaped data. It is the trusted
+core's responsibility to supply canonical summary JSON and actual historical
+phase/receipt; this library never fabricates a durable receipt.
+
+`ha_authorize(call,binding,absoluteDeadlineMs,completion,context)` accepts the
+exact PR49 five-field requestId/intentDigest/decision/ownerId/policyDigest binding.
+It validates originating call ID/decision and fixed owner/policy. The future core
+must derive the supplied absolute deadline from the minimum of the **original**
+canonical ISO approval/job deadlines. The adapter clamps it against the original
+call timeout and a monotonic deadline; attempts never renew time. It preserves a
+reference to the original broker message and uses that message's actual unique
+sender as Polkit's `system-bus-name` subject. It never substitutes the server's
+root identity, a proxy name, supplied PID/UID or caller subject JSON.
+
+Approve and reject use separate fixed `org.buzz.host-approval.approve` and
+`org.buzz.host-approval.reject` actions. Checks are asynchronous, with bounded
+server-derived details and distinct cancellation IDs. A no-interaction challenge
+precheck rejects cached/implicit YES and retained grants; only then does the
+adapter request `AllowUserInteraction`. Final denial/challenge/error/malformed
+reply, temporary authorization metadata or retained/dismissed evidence denies.
+A genuine authority-owned reply is necessary but does **not** independently prove
+a fresh prompt or auth_self policy. Only later host acceptance of non-keep
+policy/rules, exact owner mapping, real SSH controlling TTY and same-name text
+agent can establish that. No agent is registered or started here. Missing OS
+TTY/session evidence denies Decide authority; Inspect needs only owner broker
+credentials. The production path checks broker UID/PID, pidfd liveness and
+OS-derived active session/TTY; it never accepts a caller TTY assertion.
+
+The service broker identity, unique sender and current Polkit well-known-name owner are
+pinned and rechecked. The installed system-bus ownership policy establishing the
+genuine Polkit service remains a host trust prerequisite. Sender/authority/service-name loss, broker disconnect,
+cancel, timeout, time regression, teardown or failed credential/watch/send
+operations invalidate pending auth and leases. A poisoned/disconnected server
+closes its owned connection; a future launcher must treat a negative process
+result as unavailable, never adopt a replacement authority. Owned cancellation is best-effort;
+late success cannot resurrect a call. `ha_lease_valid` is synchronous and rechecks
+live local/broker/OS/time evidence; `ha_lease_free` invalidates the associated call.
+This remains a conservative observation, not an atomic proof against a remote
+change racing a filesystem CAS. A future independently reviewed native-to-JS
+bridge must map an actual live lease to PR49's binding/authorityId/timestamps and
+synchronous stillValid plus AbortSignal. No boolean or JSON snapshot substitutes
+for that bridge; no store.decide/reserve call or admission.lock exists here.
+
+The API is single-threaded and event-loop-affine. `ha_server_process` continues
+bounded dispatch while authentication is pending. There are at most64 active
+calls and one operation per sender+requestId. Handle addresses are never recycled:
+a process-wide tombstone arena bounds lifetime allocation to4096 calls,
+4096 leases and8 constructed server instances. Exhaustion denies and requires a
+fresh process; there is no reset/recovery/adoption API. Tombstones allow repeated
+free/cancel and stale-handle checks after completion/teardown without use-after-
+free or authority reuse. No outstanding native handle is restart authority.
+
+`build-host-approval-dbus.mjs` builds an offline shared library with fixed
+`/usr/bin/cc`, C17 warnings-as-errors, hardening, actual libsystemd>=255 headers and
+linkage. There is no CC/CFLAGS/PATH/download/install fallback. Its manifest records
+actual compiler/subordinates, all compiler-discovered headers, package flags and
+version, source/header/runtime/library hashes, loader and linked ELF dependencies.
+No A17 artifact digest or distro version is borrowed. Output is confined to an
+explicit preexisting caller-owned0700 disposable directory; nothing is installed
+or connected to a bus by import/build. Production artifacts contain no HA_TEST
+transport/session/fault override.
+
+The mandatory C fixture and Node runner use a disposable broker, distinct client
+connection and fake Polkit, including sender preservation, both fixed actions,
+exact private details, cancellation/distinct IDs, malformed inputs/results,
+concurrency/output bounds, clock/deadline, disconnect/replacement, allocation/
+send/watch/credential failures, teardown/stale handles and late/double completion.
+Both strict and ASan+UBSan builds are required. Test-only session/TTY/authority/core
+claims are explicitly synthetic; fake core responses are not durable admission,
+prepared workspace, Gateway or live Polkit/root evidence. Missing compiler,
+libsystemd development files or disposable broker is BLOCKED/FAIL, never a silent
+SKIP/PASS. Full existing Node/shell/pinned integration and fresh independent
+Reviewer checks remain required; source-only results do not satisfy H1-H9.
+
+Source rollback is a separately scoped human-reviewed revert. Future installed
+rollback stops new calls, cancels pending checks and invalidates leases while
+preserving every durable decision/reservation/unknown effect for reconciliation.
+A lost reply cannot prove that a future core did not commit. No timeout may undo
+committed approval, delete evidence or replay a reservation. Terminal agent/CLI,
+root composition/installation, actual policy and prompt validation, native-JS
+continuity, store custody, managed workspace and private job delivery remain
+separate explicitly authorized increments.
