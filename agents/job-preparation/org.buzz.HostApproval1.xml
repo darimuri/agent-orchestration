@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Inert contract only: no activation, policies, executable or credentials. -->
+<node name="/org/buzz/HostApproval1">
+  <interface name="org.buzz.HostApproval1">
+    <method name="Inspect">
+      <arg name="requestId" type="s" direction="in"/>
+      <arg name="intentDigest" type="s" direction="out"/>
+      <arg name="summaryJson" type="s" direction="out"/>
+      <arg name="phase" type="s" direction="out"/>
+    </method>
+    <method name="Decide">
+      <arg name="requestId" type="s" direction="in"/>
+      <arg name="decision" type="s" direction="in"/>
+      <arg name="phase" type="s" direction="out"/>
+      <arg name="receiptId" type="s" direction="out"/>
+    </method>
+  </interface>
+</node>
