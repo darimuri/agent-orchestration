@@ -161,8 +161,9 @@ int main(int argc, char **argv) {
     char slave_name[128]; assert(ptsname_r(master, slave_name, sizeof(slave_name)) == 0);
     /* Deliberately inherited unrelated FD must not cross the agent exec. */
     int unrelated[2]; assert(pipe(unrelated) == 0);
-    pid_t sentinel = fork(); assert(sentinel >= 0);
     int service_fd = sd_bus_get_fd(service), other_fd = sd_bus_get_fd(other);
+    assert(service_fd >= 0 && other_fd >= 0 && service_fd != other_fd);
+    pid_t sentinel = fork(); assert(sentinel >= 0);
     if (!sentinel) { assert(close(service_fd) == 0 && close(other_fd) == 0); for (;;) pause(); }
     client_pid = fork(); assert(client_pid >= 0);
     if (!client_pid) {
