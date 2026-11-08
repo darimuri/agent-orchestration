@@ -302,7 +302,9 @@ _Noreturn static void child_exec(struct cli *c, int notify_write, int error_writ
     char *const environment[] = {"LANG=C", "LC_ALL=C", "TZ=UTC", "TERM=dumb", "GIO_USE_VFS=local", NULL};
     execve(agent, args, environment);
     /* EOF alone is NEVER exec success: also require a live pidfd-owned child. */
-    const char failed = 'E'; (void)write(4, &failed, 1u); _exit(126);
+    const char failed = 'E';
+    if (write(4, &failed, 1u) != 1) _exit(125);
+    _exit(126);
 }
 static int spawn_agent(struct cli *c) {
     int notify[2] = {-1, -1}, status[2] = {-1, -1}, gate[2] = {-1, -1};
