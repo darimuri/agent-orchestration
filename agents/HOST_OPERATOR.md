@@ -1861,3 +1861,108 @@ committed approval, delete evidence or replay a reservation. Terminal agent/CLI,
 root composition/installation, actual policy and prompt validation, native-JS
 continuity, store custody, managed workspace and private job delivery remain
 separate explicitly authorized increments.
+
+### Fixed terminal approval client source (not installed)
+
+`job-preparation/native/host-approval.c` consumes the frozen PR51 `Inspect`/`Decide`
+API. It is a one-shot unprivileged executable, with exactly these forms:
+
+```text
+host-approval approve <32-lowercase-hex-requestId>
+host-approval reject <32-lowercase-hex-requestId>
+```
+
+There are no options, environment-selected endpoints, password arguments, stdin
+passwords or alternate executables. Production denies root, shared agent UID10001,
+real/effective/saved identity mismatches, capabilities, secure execution and missing,
+redirected or background controlling terminals. The server independently enforces
+its configured owner and session; the client UID check grants no authority.
+
+The client opens the fixed local system broker, ignoring inherited `DBUS_*`, and
+verifies the kernel broker peer is root. It retains one connection and broker ID,
+resolves the existing `org.buzz.HostApproval1` unique owner, and checks that owner's
+broker-provided Unix UID is root. Calls target that unique owner, fixed object and
+interface with autoactivation disabled. Broker/name loss or replacement cancels the
+attempt; there is no activation, reconnect, retry or parallel decision queue.
+
+One `Inspect(s)->sss` returns digest, summary, phase in that order and validates
+phase, empty-or-hex64 digest and a complete summary
+of at most16384 bytes. Pending requires a nonempty digest and summary. The request,
+requested decision, phase, digest and ENTIRE root-provided summary are written to
+the controlling TTY before any authentication child exists. Controls, backslashes,
+ESC, CR, bidi and every non-ASCII byte render as literal `\xHH`. The summary is
+opaque text, including the root's Developer capability profile and Ready scope;
+it is never evaluated as terminal controls, HTML, Markdown or URLs. This source
+phase does not authorize Ready. Non-pending observations cause no agent or Decide,
+return1 and instruct explicit inspection/reconciliation. Historical decisions are
+not new authentication.
+
+For pending only, the client forks the fixed `/usr/bin/pkttyagent` with
+`--system-bus-name` set to this SAME connection's unique name and `--notify-fd3`
+(passed as separate option/value arguments). It supplies a fixed five-variable
+locale/terminal environment, closes all unrelated FDs, and gives the agent the TTY
+directly through a separate blocking file description. The client never reads
+terminal/password input or captures agent output.
+No process-subject fallback, internal agent, shell or caller-chosen helper exists.
+Exec is gated until the parent owns the child's pidfd. Readiness requires BOTH
+exec-status EOF and notify-FD closure, plus a still-live owned child. A byte on
+notify, failed exec, exited child, registration conflict or missing notification
+fails closed. Notification is EOF, not a success byte.
+
+After readiness and broker/owner/TTY/child rechecks, there is at most ONE
+`Decide(ss)->ss` on the original connection. Exact sender/signature, trailing data,
+allowed phase and empty-or-hex32 receipt are checked. Only the requested approved
+or rejected phase with nonempty receipt prints `server_confirmed` and that receipt.
+This is the root service's reported decision, not proof of a fresh real prompt,
+job creation, execution, an actual store commit in synthetic tests or live readiness.
+
+Exit codes are0 for a matching confirmed receipt AND successful owned-child
+cleanup,1 for definite local/pre-send failure, historical observation or a valid
+nonmatching server result, and2 for `outcome_unknown`. After possible Decide
+submission, lost/malformed/untrusted replies, disconnect, signal, agent death and
+timeout remain unknown; no resend or undo is attempted. A valid receipt remains
+displayed if cleanup subsequently fails. Inspect/reconcile the SAME request ID
+explicitly; never recycle it or submit a fresh ID to bypass uncertainty.
+
+The fixed monotonic total budget is60000ms, with the last2000ms reserved for
+cleanup; readiness is at most10000ms within the remaining work budget. No stage
+renews deadlines. The service's canonical deadlines and shorter authorization
+budget still win. Cancellation closes the call/connection, sends TERM and then KILL
+only to the invocation-owned child, and waits/reaps within the original budget.
+The numeric PID fallback is limited to a never-reaped child behind the exec gate
+when pidfd acquisition fails; that PID cannot have been reused. SIGCHLD auto-reap
+is disabled before fork. Parent death has a kernel SIGKILL parent-death signal and
+parent-liveness checks on both sides of the gate. SIGKILL executes no user cleanup;
+unresolved reaping or terminal restoration returns2. Saved terminal attributes and
+pending input are restored/discarded only after the owned agent is proven reaped.
+Real session-loss/uncatchable-parent-death terminal restoration remains a host gate.
+
+`build-host-approval.mjs` builds offline using only fixed `/usr/bin/cc` and protected
+source/tool/header/runtime inventories, C17 warnings-as-errors, PIE, stack protection,
+RELRO/NOW and non-executable stack. It requires libsystemd>=255. No CC/CFLAGS/PATH,
+download, install or compiler fallback exists. Output must be a canonical existing
+caller-owned0700 directory. Only the new private staged executable is normalized
+to0755; the measured manifest is0600. No binaries, policy/service files or activation
+are committed. The manifest records source/header dependencies, compiler and
+subordinates, flags, runtime, ELF dependencies and loaders; inputs are rechecked.
+Installed pkttyagent/Polkit versions and runtime trust are separate host inventory.
+
+`host-approval-cli.test.mjs` is discovered by the full Node glob. Its production
+build, strict native and ASan+UBSan PTY gates are MANDATORY failures when compiler,
+libsystemd, disposable broker, PTY or executable scratch is unavailable. The C
+fixture includes the actual client state machine with compile-only synthetic
+endpoint/UID/agent/fault controls; none are compiled into production. It uses a
+real disposable broker, distinct service/client connections, fake agent and PTY,
+checking decision sender/agent subject continuity, full summary ordering, hostile
+bytes, malformed replies, cancellation, lost replies, lifecycle/FD cleanup and a
+nonsecret fake password marker. Fake UID/service/receipt/agent behavior is explicitly
+synthetic; it proves no real root store, installed Polkit prompt or live host session.
+Exact-head native counts, failures and skipped full-suite integrations must be
+reported separately. No compiler/package installation is authorized by these tests.
+
+This remains source only: no native-JS store bridge, root composition/executor,
+browser decisions, installation, policy, runtime or workspace/Git/job effects.
+Browser remains read-only. All live H1-H9 remain NOT_READY. Independent review and
+human approval/merge are separate gates. Before installation, rollback is a
+separate reviewed source revert limited to these five paths; preserve any actual
+historical receipts and unknown outcomes, with no automatic undo/retry/GC.
