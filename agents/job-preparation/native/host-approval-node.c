@@ -36,6 +36,36 @@ static const napi_type_tag server_tag = {UINT64_C(0x5491ad8c21d75981), UINT64_C(
 static const napi_type_tag call_tag = {UINT64_C(0x6692bd8d31d86982), UINT64_C(0xbf1362923b7bcd22)};
 static const napi_type_tag lease_tag = {UINT64_C(0x7793ce9e41e97983), UINT64_C(0xcf2473a34c8cde33)};
 #ifdef HA_TEST
+#include <time.h>
+static int test_monotonic_us(uint64_t *out) {
+    struct timespec t;
+    if (clock_gettime(CLOCK_MONOTONIC, &t) < 0 || t.tv_sec < 0 ||
+        (uint64_t)t.tv_sec > (UINT64_MAX - 1000000u) / 1000000u) return -EIO;
+    *out = (uint64_t)t.tv_sec * 1000000u + (uint64_t)t.tv_nsec / 1000u;
+    return 0;
+}
+/* Test transport only: finish authentication/Hello before construction. */
+static int test_bus_ready(sd_bus *bus) {
+    uint64_t start = 0, now = 0;
+    if (test_monotonic_us(&start) < 0 || start > UINT64_MAX - 1000000u) return -EIO;
+    const uint64_t deadline = start + 1000000u;
+    for (unsigned turn = 0; turn < 1024u; turn++) {
+        if (test_monotonic_us(&now) < 0 || now < start) return -EIO;
+        if (now >= deadline) return -ETIMEDOUT;
+        int ready = sd_bus_is_ready(bus);
+        if (ready != 0) return ready < 0 ? ready : 0;
+        int r = sd_bus_process(bus, NULL);
+        if (r < 0) return r;
+        if (r == 0) {
+            if (test_monotonic_us(&now) < 0 || now < start) return -EIO;
+            if (now >= deadline) return -ETIMEDOUT;
+            uint64_t left = deadline - now;
+            r = sd_bus_wait(bus, left < 10000u ? left : 10000u);
+            if (r < 0) return r;
+        }
+    }
+    return -ETIMEDOUT;
+}
 static unsigned node_fault;
 #endif
 static napi_status reference(napi_env env, napi_value value, uint32_t count, napi_ref *out) {
@@ -321,6 +351,7 @@ static napi_value create_server(napi_env env, napi_callback_info info) {
     int r = sd_bus_set_address(bus, address);
     if (r >= 0) r = sd_bus_set_bus_client(bus, 1);
     if (r >= 0) r = sd_bus_start(bus);
+    if (r >= 0) r = test_bus_ready(bus);
     if (r >= 0) r = ha_test_server_new(&config, &ops, bus, &s->server);
     sd_bus_unref(bus);
 #else

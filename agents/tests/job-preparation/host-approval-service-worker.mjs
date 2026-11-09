@@ -32,7 +32,7 @@ function custody() {
 function child(bin,args) {
   const cp = spawn(bin,args,{env:{LANG:'C',LC_ALL:'C',TZ:'UTC'},stdio:['ignore','pipe','pipe']});children.add(cp);
   let stdout='',stderr='';cp.stdout.on('data',b=>{stdout+=b;});cp.stderr.on('data',b=>{stderr+=b;});
-  const done = new Promise((resolve,reject)=>{cp.once('error',reject);cp.once('exit',(code,signal)=>{children.delete(cp);resolve({code,signal,stdout,stderr});});});
+  const done = new Promise((resolve,reject)=>{cp.once('error',reject);cp.once('close',(code,signal)=>{children.delete(cp);resolve({code,signal,stdout,stderr});});});
   return {cp,done,output:()=>stdout};
 }
 async function ready(c,pattern) {
@@ -59,15 +59,34 @@ try {
   const require=createRequire(import.meta.url);const native=require(addon);
   globalThis.__fixtureNative=native;globalThis.__fixtureAddress=address;
   let captures=0,lastCall,errors=0;
+  const phases={inspect:0,decide:0,authorize:0,authorized:0,settled:0,reply:0};
+  globalThis.__fixturePhase=name=>{assert(Object.hasOwn(phases,name));phases[name]++;};
+  const afterCheck=['abort','close-pending','gc-pending','env-shutdown','authority-loss','clock-regression'];
+  let pendingFault,faultApplied=false;
+  globalThis.__fixtureAuthorize=()=>{
+    phases.authorize++;
+    if(afterCheck.includes(scenario)) {
+      assert.equal(pendingFault,undefined);
+      pendingFault=ready(authority,/CHECK subject=:[0-9.]+ action=org\.buzz\.host-approval\.approve flags=0/).then(()=>{
+        if(scenario==='abort')globalThis.__fixtureAbort.abort();
+        if(scenario==='close-pending')service.close();
+        if(scenario==='gc-pending')globalThis.gc();
+        if(scenario==='authority-loss')authority.cp.kill('SIGTERM');
+        if(scenario==='clock-regression')time=epoch-1;
+        if(scenario==='env-shutdown'){console.log('ENV_SHUTDOWN after CHECK synthetic');process.exit(0);}
+        faultApplied=true;
+      }).catch(error=>{errors++;console.error(error);service.close();});
+    }
+  };
   globalThis.__fixtureBeforeReply=()=>{if(scenario==='reply-failure')native.testFault(2);};
   globalThis.__fixtureObserve=(call,request,decision)=> {
-    const prior=lastCall;captures++;lastCall=call;assert.equal(request,id);
+    const prior=lastCall;captures++;phases[decision?'decide':'inspect']++;lastCall=call;assert.equal(request,id);
     if(prior)assert.throws(()=>prior.authorize.call(call,{},epoch+1000,new AbortController().signal));
     for(const fake of [{},{...call},JSON.parse(JSON.stringify(call))])assert.throws(()=>call.reply.call(fake,{phase:'pending',intentDigest:'',summary:''}));
     if(scenario.startsWith('binding-')&&decision){const wrong={requestId:id,intentDigest:seed.inspect(id).intentDigest,decision,ownerId:policy.ownerId,policyDigest:digest(policy)};const field=scenario.slice(8);wrong[field]=field==='requestId'?'f'.repeat(32):field==='decision'?'reject':field.includes('Digest')?'f'.repeat(64):'wrong-owner';try{void call.authorize(wrong,epoch+1000,new AbortController().signal).catch(()=>{});}catch{}}
     assert.throws(()=>call.authorize.call({...call},{},epoch+1000,new AbortController().signal));
     if(scenario==='reentry'&&decision)assert.throws(()=>service.processOnce());
-    if(scenario==='abort'&&decision){const signal=new AbortController();setTimeout(()=>signal.abort(),5);globalThis.__fixtureSignal=signal.signal;}
+    if(scenario==='abort'&&decision){globalThis.__fixtureAbort=new AbortController();globalThis.__fixtureSignal=globalThis.__fixtureAbort.signal;}
   };
   let source=fs.readFileSync(path.join(root,'approval-service.mjs'),'utf8');
   source=source.replace("createRequire(import.meta.url)",`createRequire(${JSON.stringify(pathToFileURL(path.join(root,'approval-service.mjs')).href)})`)
@@ -79,7 +98,9 @@ try {
     .replace('native.createServer(config, callbacks)','native.createServer(config, callbacks, globalThis.__fixtureAddress)')
     .replace('inspect(call, id) {','inspect(call, id) { globalThis.__fixtureObserve(call, id);')
     .replace('decide(call, id, decision) {','decide(call, id, decision) { globalThis.__fixtureObserve(call, id, decision);')
-    .replace('call.reply({ phase: result.phase, receiptId });','globalThis.__fixtureBeforeReply(); call.reply({ phase: result.phase, receiptId });');
+    .replace('const lease = await call.authorize(binding, attemptDeadline, signal);','globalThis.__fixtureAuthorize(); const lease = await call.authorize(binding, attemptDeadline, signal); globalThis.__fixturePhase("authorized");')
+    .replace('const result = check(await store.decide(id, decision));','const result = check(await store.decide(id, decision)); globalThis.__fixturePhase("settled");')
+    .replace('call.reply({ phase: result.phase, receiptId });','globalThis.__fixtureBeforeReply(); call.reply({ phase: result.phase, receiptId }); globalThis.__fixturePhase("reply");');
   if(scenario==='gc-live')source=source.replace('usable(); const authorizedAt = clock();','globalThis.gc(); usable(); const authorizedAt = clock();');
   if(scenario==='abort')source=source.replace('call.authorize(binding, attemptDeadline, signal)','call.authorize(binding, attemptDeadline, globalThis.__fixtureSignal)');
   const module=await import('data:text/javascript;base64,'+Buffer.from(source).toString('base64'));
@@ -113,18 +134,15 @@ try {
       if(scenario==='readback')mock.method(fs,'readSync',(...args)=>{if(fileFor(args[0]).includes('.decision.'))throw Error('synthetic readback');return original.readSync(...args);});
     }
     if(scenario==='lock')fs.writeFileSync(path.join(storeDir,'admission.lock'),'{}',{mode:0o600});
-    if(scenario==='clock-regression')setTimeout(()=>{time=epoch-1;},20);
-    if(scenario==='authority-loss')setTimeout(()=>authority.cp.kill('SIGTERM'),20);
-    if(scenario==='close-pending')setTimeout(()=>service.close(),20);
-    if(scenario==='gc-pending')setTimeout(()=>globalThis.gc?.(),20);
-    if(scenario==='env-shutdown')setTimeout(()=>{console.log('ENV_SHUTDOWN synthetic');process.exit(0);},20);
     const faultModes={'native-allocation':1,'native-send':2,'native-watch':3,'native-credentials':4,'reference-failure':5,'wrapper-allocation':6,'double-completion':7,'null-completion':8};
     if(faultModes[scenario])native.testFault(faultModes[scenario]);
     const decision=scenario==='reject'?'reject':'approve';
     result=await child(executable,['terminal',address,decision,id,executable,scenario]).done;
     const positive=['approve','reject','short-write','handles','gc-live'].includes(scenario);
     if(positive) {
-      assert.equal(result.code,0,result.stderr+'\n'+result.stdout);assert.equal(errors,0);
+      assert.equal(result.code,0,JSON.stringify({result,phases,errors,authority:authority.output(),files:fs.readdirSync(storeDir)}));assert.equal(errors,0);
+      assert.deepEqual(phases,{inspect:2,decide:1,authorize:1,authorized:1,settled:1,reply:1});
+      await ready(authority,/CHECK subject=:[0-9.]+ action=org\.buzz\.host-approval\.(approve|reject) flags=1/);
       const observed=seed.inspect(id);assert.equal(observed.phase,decision==='approve'?'approved':'rejected');assert.match(observed.decisionReceiptId,/^[a-f0-9]{32}$/);assert(result.stdout.includes(observed.decisionReceiptId));
       const summary=result.stdout.indexOf('Root-provided summary'),agent=result.stdout.indexOf('FAKE_AGENT');assert(summary>=0&&agent>summary);
       const subject=/FAKE_AGENT subject=(:[0-9.]+)/.exec(result.stdout)?.[1];assert(subject&&authority.output().includes('subject='+subject+' '));
@@ -139,9 +157,14 @@ try {
       else assert.notEqual(seed.inspect(id).phase,'approved');
       if(['enospc','zero-write','fsync','readback','lock'].includes(scenario)){assert.throws(()=>service.processOnce());assert.throws(()=>module.createApprovalDecisionService({directory:storeDir,policy,ownerUid:actualUid,clock,nativeArtifact:{}}));}
     }
+    if(afterCheck.includes(scenario)) {
+      assert(pendingFault);await pendingFault;assert.equal(faultApplied,true);
+      assert.equal(phases.decide,1);assert.equal(phases.authorize,1);
+      assert.match(authority.output(),/CHECK subject=/);
+    }
     if(lastCall)assert.throws(()=>lastCall.authorize({},epoch+1000,new AbortController().signal));
   }
-  console.log(JSON.stringify({scenario,captures,synthetic:true,notLive:'NOT live Polkit/TTY/root/store acceptance'}));
+  console.log(JSON.stringify({scenario,captures,phases,synthetic:true,notLive:'NOT live Polkit/TTY/root/store acceptance'}));
   }
   }
 } finally {

@@ -37,6 +37,19 @@ test('Node-API code pins handles, thread affinity and lease ownership through re
   assert(c.indexOf('int r = ok ? ha_call_reply')<c.indexOf('finish(c); s->operation = false'));
   const production=c.replace(/#ifdef HA_TEST[\s\S]*?#else/g,'').replace(/#ifdef HA_TEST[\s\S]*?#endif/g,'');assert(!/getenv\(|system\(|execve\(|fork\(/.test(production));
 });
+test('HA_TEST construction requires bounded ready processing and fixture observes async phases',()=>{
+  const c=fs.readFileSync(native,'utf8'),w=fs.readFileSync(worker,'utf8');
+  const handshake=c.slice(c.indexOf('static int test_bus_ready'),c.indexOf('static unsigned node_fault'));
+  assert(handshake.includes('turn < 1024u'));assert(handshake.includes('now >= deadline'));
+  assert(handshake.includes('sd_bus_is_ready(bus)'));assert(handshake.includes('sd_bus_process(bus, NULL)'));
+  assert(handshake.includes('sd_bus_wait(bus, left < 10000u ? left : 10000u)'));
+  assert(handshake.includes('return -ETIMEDOUT'));
+  const start=c.indexOf('r = sd_bus_start(bus)'),ready=c.indexOf('r = test_bus_ready(bus)'),construct=c.indexOf('r = ha_test_server_new');
+  assert(start>=0 && start<ready && ready<construct && construct<c.indexOf('sd_bus_unref(bus)',construct));
+  assert(w.includes('inspect:2,decide:1,authorize:1,authorized:1,settled:1,reply:1'));
+  assert(w.includes('await pendingFault'));assert(w.includes('await ready(authority,/CHECK'));
+  assert(!/setTimeout\(.*(?:service\.close|authority\.cp\.kill|time=epoch-1|process\.exit)/.test(w));
+});
 test('offline addon flags and exact Node imports retain hardening without standalone -z defs',()=>{
   assert(Object.isFrozen(nodeFlags)&&Object.isFrozen(nodeImports));
   for(const f of ['-std=c17','-Werror','-Wconversion','-Wshadow','-fPIC','-shared','-DNAPI_VERSION=8','-Wl,-z,relro,-z,now,-z,noexecstack'])assert(nodeFlags.includes(f));
@@ -63,8 +76,19 @@ for(const sanitizer of [false,true])test('MANDATORY actual terminal/addon/servic
   const flags=run('/usr/bin/pkg-config',['--cflags','--libs','libsystemd'],dir).trim().split(/\s+/);assert(flags.every(f=>['-lsystemd','-pthread'].includes(f)||/^-[IL]\/[A-Za-z0-9_./+-]+$/.test(f)));
   const instrument=sanitizer?['-O1','-fsanitize=address,undefined','-fno-omit-frame-pointer']:[];
   const header=path.resolve(path.dirname(process.execPath),'../include/node');
-  run('/usr/bin/cc',[...nodeFlags,...instrument,'-DHA_TEST','-I'+header,native,authority,'-o',addon,...flags,'-lm'],dir);
-  run('/usr/bin/cc',[...nodeFlags.filter(f=>f!=='-shared'&&f!=='-fPIC'),...instrument,'-fPIE','-pie',fixture,'-o',executable,...flags,'-lm'],dir);
+  // Regress permissive host umasks: the unchanged client must still accept
+  // this fixture as its protected synthetic agent, without relaxing its checks.
+  const previous=process.umask(0o002);
+  try {
+    run('/usr/bin/cc',[...nodeFlags,...instrument,'-DHA_TEST','-I'+header,native,authority,'-o',addon,...flags,'-lm'],dir);
+    run('/usr/bin/cc',[...nodeFlags.filter(f=>f!=='-shared'&&f!=='-fPIC'),...instrument,'-fPIE','-pie',fixture,'-o',executable,...flags,'-lm'],dir);
+  } finally { process.umask(previous); }
+  for(const artifact of [addon,executable]) {
+    fs.chmodSync(artifact,0o755);
+    const stat=fs.lstatSync(artifact);
+    assert(stat.isFile());assert.equal(stat.uid,process.getuid());assert.equal(stat.nlink,1);
+    assert.equal(stat.mode&0o7777,0o755);
+  }
   for(const scenario of bridgeScenarios){
     const home=path.join(dir,scenario);fs.mkdirSync(home,{mode:0o700});
     const cp=spawn(process.execPath,['--expose-gc',worker,home,addon,executable,scenario],{cwd:dir,env:{...env,...(sanitizer?{ASAN_OPTIONS:'detect_leaks=1:abort_on_error=1',UBSAN_OPTIONS:'halt_on_error=1:print_stacktrace=1'}:{})},detached:true,stdio:['ignore','pipe','pipe']});
