@@ -349,6 +349,8 @@ static napi_value test_fault(napi_env env, napi_callback_info info) {
     return undefined(env);
 }
 #endif
+/* Node 18/20/22 macros define this export without declaring it first. */
+NAPI_MODULE_EXPORT int32_t NODE_API_MODULE_GET_API_VERSION(void);
 NAPI_MODULE_INIT() {
     if (!main_thread()) return fail(env);
     struct node_state *state = calloc(1, sizeof(*state)); if (!state) return fail(env);

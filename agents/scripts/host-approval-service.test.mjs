@@ -31,6 +31,8 @@ test('bridge import is inert and nonroot construction fails without journal writ
 });
 test('Node-API code pins handles, thread affinity and lease ownership through reply',()=>{
   const c=fs.readFileSync(native,'utf8');
+  const prototype=c.indexOf('NAPI_MODULE_EXPORT int32_t NODE_API_MODULE_GET_API_VERSION(void);');
+  assert(prototype>=0 && prototype<c.indexOf('NAPI_MODULE_INIT() {'), 'version export must have a prior prototype under -Wmissing-prototypes');
   for(const word of ['napi_type_tag_object','napi_check_object_type_tag','napi_create_reference','napi_add_env_cleanup_hook','SYS_gettid','ha_authorize','ha_call_reply','ha_lease_valid','ha_lease_free','HA_MAX_HANDLES','HA_MAX_SERVERS'])assert(c.includes(word),word);
   assert(c.indexOf('int r = ok ? ha_call_reply')<c.indexOf('finish(c); s->operation = false'));
   const production=c.replace(/#ifdef HA_TEST[\s\S]*?#else/g,'').replace(/#ifdef HA_TEST[\s\S]*?#endif/g,'');assert(!/getenv\(|system\(|execve\(|fork\(/.test(production));
