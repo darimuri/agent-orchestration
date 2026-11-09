@@ -1966,3 +1966,73 @@ Browser remains read-only. All live H1-H9 remain NOT_READY. Independent review a
 human approval/merge are separate gates. Before installation, rollback is a
 separate reviewed source revert limited to these five paths; preserve any actual
 historical receipts and unknown outcomes, with no automatic undo/retry/GC.
+
+### Source-only native-to-JS decision journal bridge (issue #55)
+
+`job-preparation/approval-service.mjs` exports explicit trusted construction:
+`createApprovalDecisionService({directory, policy, ownerUid, clock, nativeArtifact})`.
+The returned frozen interface contains only `processOnce()` and `close()`.
+Import does not load an addon, connect to a bus, create journal files or pump an
+operation. The future trusted launcher must yield between explicit process turns;
+this source slice supplies no launcher, installation, activation or reconnect loop.
+Constructor arguments are trusted host configuration, never browser, proposal,
+Buzz, URL or request-selected authority. No submit/reserve/executor method is
+exposed. Browser decisions remain read-only.
+
+The private Node-API addon compiles the unchanged native authority and uses its
+actual originating call and synchronous lease checks. Each Decide call creates
+its own actual admission-store authority closure against the same fixed directory,
+policy and nonregressing clock. It rechecks the five-field binding and original
+canonical deadlines. Native call and lease survive the entire durable settlement
+and native reply attempt; releasing a grant Promise does not release authority.
+Inspect uses read-only inspection and projects the complete canonical intent
+summary within 16 KiB. Receipts come only from canonical journal observations.
+The native API, XML, terminal client and admission journal formats are unchanged.
+
+Uncertainty is sticky across the process composition. A custody/construction
+failure, `outcome_unknown`, clock regression, ambiguous storage publication or
+reply failure disables every call and future construction in that process.
+A durable decision followed by lost reply remains historical committed evidence
+with client uncertainty; there is no undo, resend, new-ID workaround or reservation.
+Closing cancels pending native calls. Handles are main-thread/environment/call
+bound and branded, references are bounded, and teardown retains C tombstones until
+all JS wrappers have finalized. Native historical arena exhaustion remains denial.
+
+`node agents/scripts/build-host-approval-node.mjs <private-0700-output>` performs
+an offline build with fixed `/usr/bin/cc`, pkg-config and readelf, matched measured
+Node headers/runtime, Node-API baseline 8 and libsystemd >=255. The separately
+specified `.node` flags retain C17 warnings-as-errors, FORTIFY, PIC, RELRO/NOW and
+non-executable stack. Its exact Node-API import allowlist must resolve from the
+measured runtime; other dynamic imports must resolve from inventoried ELF inputs
+(except explicit weak CRT imports). A standalone `-z defs` rule is not applied to
+Node's intentional dynamic imports. Actual inert addon loading is a required gate.
+The manifest measures both native sources, transitive headers, toolchain and
+subordinates, runtime/ABI/platform/architecture, imports, linked inputs and artifact.
+Production loading requires a trusted exact path/digest plus manifest path/digest,
+root-owned canonical protected inputs and a matching executing runtime. There is
+no path search, environment compiler override, node-gyp, download or install.
+Use umask 077 before creating protected validation clones; changing umask does not
+repair pre-existing writable source/ancestor permissions.
+
+The new discovered `host-approval-service.test.mjs` includes mandatory production
+build/load and strict/sanitizer integration gates. Its isolated fixture compiles
+HA_TEST separately, uses a disposable broker/fake Polkit and real terminal client
+under a PTY, and runs the actual addon/service/admission journal. Only the isolated
+worker simulates root filesystem metadata and selects the test transport by an
+explicit in-memory copy of the service module; production has no test constructor
+port. Approve/reject receipts, sender continuity, summary-before-agent ordering,
+historical/idempotent/conflict observations, zero-write inspection and storage,
+handle, cancellation, GC, shutdown and crash cases are synthetic evidence. They
+are not installed Polkit, root journal custody, actual host session or H1–H9
+acceptance. Missing compiler/headers/broker resources fail as BLOCKED, never skip.
+The sanitizer gate requires a compatible measured ASan-enabled Node host running
+the instrumented addon and fixture; no loader-order/leak suppression or preload
+fallback is used. Native compilation/execution was unavailable in the Developer
+container; host execution of these gates remains mandatory before review.
+
+Run the complete orchestration Node suite, existing native authority/client gates,
+all shell/resource checks and the unchanged pinned integration procedure in
+addition to these new gates. No source test substitutes for production artifact,
+protected loaded-set/session/Polkit/storage durability, deployment, independent
+review or owner approval. No system service, policy, dependency, credential,
+Gateway, workspace/job or runtime operation is installed or activated by this slice.
