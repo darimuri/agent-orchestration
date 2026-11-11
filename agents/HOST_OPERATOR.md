@@ -2036,3 +2036,106 @@ addition to these new gates. No source test substitutes for production artifact,
 protected loaded-set/session/Polkit/storage durability, deployment, independent
 review or owner approval. No system service, policy, dependency, credential,
 Gateway, workspace/job or runtime operation is installed or activated by this slice.
+
+### Offline approval qualification support (AGE20 / issue #60)
+
+`tests/job-preparation/Dockerfile.approval-qualification` and
+`scripts/qualify-host-approval.sh` define a separate qualification environment.
+They do not change the agent runtime images (issue #61). The checked-in
+`qualification-inputs.json` is deliberately **non-executable**: no patched Node
+version, checksum, builder digest or package inventory has been selected.
+Implementation review does not establish native qualification or live H1–H9.
+
+The owner must first approve an actual published patched Node26 release against
+its security advisory and signed source checksums. In a disposable build context,
+copy the Dockerfile, wrapper, an owner-reviewed completed inputs JSON, and the
+verified `node-v<VERSION>.tar.xz`. Record the advisory, official archive URL,
+signed-checksum evidence and signer in `approval`; the wrapper checks their
+presence and URL binding, while cryptographic signature verification and release
+admission remain owner prerequisites. The source archive hash is checked again
+before extraction or compilation. Never use the test suite's synthetic inputs.
+
+Supply a prepared builder pinned by OCI digest and platform. It must already
+contain a complete, exact `dpkg-query -W` inventory matching `packages`, GCC/G++
+with the same locked `gccVersion`, binutils, libasan/libubsan, libc/development
+headers, Python3, make, tar/xz, bootstrap Node (`/usr/bin/node`), Git, pkg-config,
+readelf/ldd, D-Bus and libsystemd development files >=255. Record its package
+snapshot/provenance separately when preparing that builder. This recipe performs
+no apt/npm acquisition. Confirm the selected release's BUILDING.md supports the
+locked compiler before building. No compiler/linker fallback is attempted.
+
+Owner-host command shape (all uppercase values below must be supplied, reviewed
+values, not literal defaults):
+
+```bash
+# Context contains only the four support inputs and verified source archive.
+# BUILDER_IMAGE must equal inputs.builderImage; platform must equal inputs.platform.
+docker build --progress=plain --network=none --platform "$PLATFORM" \
+  --build-arg BUILDER_IMAGE="$BUILDER_IMAGE" \
+  --build-arg NODE_VERSION="$NODE_VERSION" \
+  --build-arg NODE_SOURCE_SHA256="$NODE_SOURCE_SHA256" \
+  --build-arg BUILD_JOBS=2 \
+  -f "$CONTEXT/Dockerfile.approval-qualification" \
+  -t "$UNIQUE_CANDIDATE_TAG" "$CONTEXT" > "$HOST_BUILD_LOG" 2>&1
+```
+
+Both normal and ASan Node are built from the admitted archive with fixed
+`/usr/bin/cc`, `/usr/bin/g++` and that builder's linker/runtime family. Build
+failure is a blocker; retain the owner build stream (`HOST_BUILD_LOG`), which receives compiler output even
+when a failed BuildKit layer cannot be exported. Successful images retain
+those logs and `toolchain.json`. The target is never copied into the image.
+Record the resulting image ID/digest and builder provenance in the dossier; this
+recipe alone does not prove bit-identical builds. A second clean owner build and
+input/output comparison are still required for reproducibility claims.
+
+Use fresh, owned executable `0700` output, matching source custody UID10001, and
+separate protected clean Git projections. Target must remain exactly commit
+`1312e7a9dec6fac055b61993c145be7f6847e216`, tree
+`3868efaef2c500a13d2bde30cd645d5aa372ab59`. Infrastructure is the independently
+reviewed support commit. Both mounts must be read-only; the wrapper checks mount
+flags, Git status and both commit/tree identities, and matches its script/recipe
+to the infrastructure projection. No inherited sanitizer/compiler/loader controls
+are admitted. Run on the owner host, with no Docker socket or credentials inside:
+
+```bash
+# OUTPUT_DIR is a fresh UID10001-owned 0700 directory on an owner-prepared
+# filesystem with a 2 GiB quota. HOST_RUN_LOG is a separate bounded host log.
+# A bind mount retains results after exit; temporary fixture /tmp is bounded too.
+run_status=0
+timeout --signal=TERM --kill-after=10s 3h docker run --name "$UNIQUE_RUN_NAME" \
+  --network=none --read-only --cap-drop=ALL --security-opt=no-new-privileges \
+  --user 10001:10001 --cpus=2 --memory=8g --pids-limit=256 \
+  --mount "type=bind,src=$TARGET_PROJECTION,dst=/target,readonly" \
+  --mount "type=bind,src=$INFRA_PROJECTION,dst=/infrastructure,readonly" \
+  --tmpfs /tmp:rw,exec,nosuid,nodev,size=1g,mode=1777 \
+  --mount "type=bind,src=$OUTPUT_DIR,dst=/output" \
+  "$QUALIFICATION_IMAGE_DIGEST" > "$HOST_RUN_LOG" 2>&1 || run_status=$?
+# A timed-out Docker client can leave its container running: stop this run only.
+docker stop --time 10 "$UNIQUE_RUN_NAME"
+# Retain OUTPUT_DIR and HOST_RUN_LOG, including failures and incomplete results.
+```
+
+Container removal is owner-controlled; preserve failed evidence first. A
+host timeout or disk/resource exhaustion is incomplete/failed qualification,
+never PASS. No operational files, system bus, Polkit, root journal or agent
+runtime are mounted. The wrapper only kills its own process groups.
+
+`result.json` records the input lock, toolchain hashes/package inventory,
+normal/ASan runtime and matching header hashes, target and infrastructure SHA/tree,
+commands, exit/signal status, TAP totals and raw log digests. Selected focused
+TAP runs contain intentional name-filtered tests; they are separate from the full
+package gate, which rejects failures, skips, cancellation and TODOs. Production
+build/manifest/inert-load, strict37 and actual ASan+UBSan37 run against the
+unchanged target runner. A separate unchanged-worker `clock-regression` run and
+minimal standalone Node-API Promise controls (resolve, reject, abandoned at
+teardown) retain independent logs. Baseline Promise findings also block clean
+sanitizer acceptance; attribution requires reviewing actual traces, never
+suppression or an automatic upstream exemption.
+
+A successful run is only `PENDING_INDEPENDENT_REVIEW`. Complete locked offline
+dependencies, unchanged pinned integration, tracked shell/synthetic regression,
+two-build provenance comparison and independent dossier review remain external
+G3/G4 acceptance prerequisites. Missing dependencies/native prerequisites stay
+failures in raw logs. A confirmed source defect needs a separate repair scope;
+do not edit the target to make this dossier pass. No live H1–H9/install/activation
+or production rollout authority follows from this support infrastructure.

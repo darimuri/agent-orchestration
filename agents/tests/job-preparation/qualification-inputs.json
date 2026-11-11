@@ -1,0 +1,15 @@
+{
+  "schema": "buzz.approval-qualification-inputs/v1",
+  "approval": null,
+  "nodeVersion": null,
+  "nodeSourceSha256": null,
+  "builderImage": null,
+  "platform": null,
+  "packages": null,
+  "gccVersion": null,
+  "target": {
+    "commit": "1312e7a9dec6fac055b61993c145be7f6847e216",
+    "tree": "3868efaef2c500a13d2bde30cd645d5aa372ab59"
+  },
+  "note": "NON-EXECUTABLE template. Owner supplies a reviewed lock in a separate build context: approval advisory/source URL/signed-checksum evidence; exact published patched Node26 version/archive hash; prepared builder image digest/platform, complete dpkg package inventory and GCC version. No release inputs are inferred."
+}
