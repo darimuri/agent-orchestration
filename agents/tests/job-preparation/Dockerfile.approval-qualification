@@ -1,0 +1,21 @@
+# Owner-only build context: these three support files, reviewed inputs and archive.
+# Prepared builder must already contain the exact locked offline toolchain/packages.
+ARG BUILDER_IMAGE
+FROM ${BUILDER_IMAGE}
+ARG BUILDER_IMAGE
+ARG TARGETPLATFORM
+ARG NODE_VERSION
+ARG NODE_SOURCE_SHA256
+ARG BUILD_JOBS
+ENV PATH=/usr/bin:/bin
+WORKDIR /qualification
+COPY Dockerfile.approval-qualification /qualification/Dockerfile.approval-qualification
+COPY qualification-inputs.json /qualification/qualification-inputs.json
+COPY qualify-host-approval.sh /qualification/qualify-host-approval.sh
+COPY node-v${NODE_VERSION}.tar.xz /inputs/node.tar.xz
+# No apt/npm/network acquisition or implicit compiler installation.
+RUN --network=none NODE_VERSION="$NODE_VERSION" NODE_SOURCE_SHA256="$NODE_SOURCE_SHA256" BUILDER_IMAGE="$BUILDER_IMAGE" QUALIFICATION_PLATFORM="$TARGETPLATFORM" BUILD_JOBS="$BUILD_JOBS" bash /qualification/qualify-host-approval.sh build-runtime /qualification/qualification-inputs.json /inputs/node.tar.xz
+ENV NODE_VERSION=${NODE_VERSION} NODE_SOURCE_SHA256=${NODE_SOURCE_SHA256}
+USER 10001:10001
+ENTRYPOINT ["/bin/bash", "/qualification/qualify-host-approval.sh"]
+CMD ["run", "/qualification/qualification-inputs.json", "/inputs/node.tar.xz", "/target", "/infrastructure", "/output"]
