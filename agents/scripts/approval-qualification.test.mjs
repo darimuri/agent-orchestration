@@ -1,4 +1,5 @@
 import test from 'node:test';
+import vm from 'node:vm';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -67,4 +68,63 @@ test('admission failure retains a machine-readable blocker in fresh output',t=>{
   assert.notEqual(r.status,0);const result=JSON.parse(fs.readFileSync(path.join(output,'result.json'),'utf8'));
   assert.equal(result.status,'BLOCKED');assert.match(result.blocker,/mandatory explicit NODE_SOURCE_SHA256/);assert.equal(result.liveAcceptance,'NOT_READY');assert.deepEqual(result.gates,[]);
   const retained=fs.readFileSync(path.join(output,'result.json'),'utf8');f.run('run',[path.join(f.dir,'target'),path.join(f.dir,'infra'),output]);assert.equal(fs.readFileSync(path.join(output,'result.json'),'utf8'),retained);
+});
+
+// Execute the verbatim admission functions with real /usr/bin/git. Only the
+// read-only mountinfo prerequisite is a bounded facade; no native/Docker run.
+function sourceFixture(t) {
+  const dir=fs.mkdtempSync(path.join(os.tmpdir(),'qualification-index-'));
+  t.after(()=>fs.rmSync(dir,{recursive:true,force:true}));
+  const env={PATH:'/usr/bin:/bin',LANG:'C',LC_ALL:'C',GIT_CONFIG_NOSYSTEM:'1',GIT_CONFIG_GLOBAL:'/dev/null',GIT_OPTIONAL_LOCKS:'0'};
+  const git=(...args)=>{
+    const r=spawnSync('/usr/bin/git',['-C',dir,...args],{env,timeout:10000});
+    assert.ifError(r.error);assert.equal(r.status,0,r.stderr.toString());return r.stdout;
+  };
+  git('init','--quiet');
+  const ordinary='gate.mjs',hostile='- space\nS fake\t雪.mjs';
+  for(const file of [ordinary,hostile]) fs.writeFileSync(path.join(dir,file),'reviewed bytes\n');
+  git('add','--',ordinary,hostile);
+  git('-c','user.name=Synthetic Qualification Fixture','-c','user.email=fixture@example.invalid','-c','core.hooksPath=/dev/null','commit','--quiet','-m','synthetic source');
+  const sh=fs.readFileSync(script,'utf8');
+  const admission=sh.slice(sh.indexOf('const fail ='),sh.indexOf('const gates ='));
+  assert(admission.startsWith('const fail =') && admission.includes('function source(p)'));
+  const facade={...fs,readFileSync:(p,...args)=>p==='/proc/self/mountinfo'
+    ? `1 0 0:1 / ${dir} ro - synthetic synthetic ro\n`
+    : fs.readFileSync(p,...args)};
+  const admit=()=>vm.runInNewContext(admission+'\nsource(target)',{
+    fs:facade,path,crypto:{createHash},spawnSync,process:{env:{}},target:dir,
+  },{timeout:10000});
+  const snapshot=()=>({index:fs.readFileSync(path.join(dir,'.git/index')),tags:git('ls-files','-v','-z'),files:[ordinary,hostile].map(p=>fs.readFileSync(path.join(dir,p)))});
+  return {dir,git,ordinary,hostile,admit,snapshot};
+}
+test('real-Git ordinary clean index admits exact identity without rewriting state',t=>{
+  const f=sourceFixture(t),before=f.snapshot(),state=f.admit();
+  assert.equal(state.commit,f.git('rev-parse','HEAD').toString().trim());
+  assert.equal(state.tree,f.git('rev-parse','HEAD^{tree}').toString().trim());
+  assert.deepEqual(f.snapshot(),before);
+});
+for(const flag of ['assume-unchanged','skip-worktree']) {
+  for(const special of [false,true]) {
+    test(`real-Git ${flag} hidden edit rejects unchanged index/source (${special?'hostile filename':'ordinary filename'})`,t=>{
+      const f=sourceFixture(t),file=special?f.hostile:f.ordinary;
+      f.git('update-index','--'+flag,'--',file);
+      fs.writeFileSync(path.join(f.dir,file),'altered unreviewed bytes\n');
+      // Reproduce the defect: status and locked identities still look clean.
+      assert.equal(f.git('status','--porcelain','--untracked-files=all').length,0);
+      const identity=f.git('rev-parse','HEAD','HEAD^{tree}'),before=f.snapshot();
+      const tag=flag==='assume-unchanged'?'h':'S';
+      assert(before.tags.includes(Buffer.from(tag+' '+file+'\0')));
+      assert.throws(f.admit,/source index has assume-unchanged or skip-worktree entries/);
+      assert.deepEqual(f.snapshot(),before);
+      assert.deepEqual(f.git('rev-parse','HEAD','HEAD^{tree}'),identity);
+    });
+  }
+}
+test('real-Git combined index bits reject and remain set even without an edit',t=>{
+  const f=sourceFixture(t);
+  f.git('update-index','--assume-unchanged','--',f.hostile);
+  f.git('update-index','--skip-worktree','--',f.hostile);
+  const before=f.snapshot();assert(before.tags.includes(Buffer.from('s '+f.hostile+'\0')));
+  assert.throws(f.admit,/source index has assume-unchanged or skip-worktree entries/);
+  assert.deepEqual(f.snapshot(),before);
 });
