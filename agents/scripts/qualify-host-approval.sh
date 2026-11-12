@@ -11,7 +11,7 @@ import { pathToFileURL } from 'node:url';
 const [mode, lockPath, archive, target, infrastructure, output] = process.argv.slice(2);
 const fail = message => { throw Error(message); };
 const hash = p => crypto.createHash('sha256').update(fs.readFileSync(p)).digest('hex');
-const fixed = {PATH:'/usr/bin:/bin',LANG:'C',LC_ALL:'C',TZ:'UTC',SOURCE_DATE_EPOCH:'0',GIT_OPTIONAL_LOCKS:'0'};
+const fixed = {PATH:'/usr/bin:/bin',LANG:'C',LC_ALL:'C',TZ:'UTC',SOURCE_DATE_EPOCH:'0',GIT_OPTIONAL_LOCKS:'0',GIT_CONFIG_NOSYSTEM:'1',GIT_CONFIG_GLOBAL:'/dev/null',GIT_ATTR_NOSYSTEM:'1',GIT_TERMINAL_PROMPT:'0',HOME:'/dev/null',XDG_CONFIG_HOME:'/dev/null'};
 const exec = (bin, args, cwd, raw=false) => {
   const r = spawnSync(bin,args,{cwd,env:fixed,encoding:'utf8',timeout:30000,maxBuffer:16*1024*1024});
   if(r.error || r.status !== 0) fail('prerequisite command failed: '+bin+' '+args.join(' '));
@@ -64,17 +64,29 @@ function readonly(p) {
 }
 function source(p) {
   readonly(p);
-  const git=(...a)=>exec('/usr/bin/git',['-c','safe.directory='+p,'-C',p,...a]);
+  // The config query itself must not invoke helpers or follow includes. Keep
+  // the same defensive argv/environment on EVERY Git call, including the audit.
+  const git=(args,raw=false)=>exec('/usr/bin/git',['--no-pager','-c','safe.directory='+p,'-c','core.fsmonitor=false','-c','core.hooksPath=/dev/null','-c','core.attributesFile=/dev/null','-C',p,...args],undefined,raw);
+  const config=git(['config','--local','--no-includes','--null','--list'],true);
+  if(config && !config.endsWith('\0')) fail('invalid source configuration listing');
+  // Deliberately allow only inert clone/identity structure. Unknown keys fail
+  // closed: includes, worktreeConfig/extensions, filters, aliases, helper/tool
+  // families and future command-bearing settings cannot bypass a denylist.
+  const structural=/^(?:core\.(?:repositoryformatversion|filemode|bare|logallrefupdates|ignorecase|precomposeunicode)|user\.(?:name|email|useconfigonly)|remote\.origin\.(?:url|fetch)|branch\.[^\x00-\x20]+\.(?:remote|merge))$/i;
+  for(const entry of config ? config.slice(0,-1).split('\0') : []) {
+    const separator=entry.indexOf('\n');
+    if(separator<1 || !structural.test(entry.slice(0,separator))) fail('unsafe or malformed source configuration');
+  }
   // Status hides edits under these index flags. Inspect tags, never formatted paths
   // or source bytes, before accepting either projection. Preserve the index as-is.
-  const index=exec('/usr/bin/git',['-c','safe.directory='+p,'-C',p,'ls-files','-v','-z'],undefined,true);
+  const index=git(['ls-files','-v','-z'],true);
   if(index && !index.endsWith('\0')) fail('invalid source index listing');
   for(const entry of index ? index.slice(0,-1).split('\0') : []) {
     if(!/^[A-Za-z?] .+$/s.test(entry)) fail('invalid source index entry');
     if(/^[a-zS] /.test(entry)) fail('source index has assume-unchanged or skip-worktree entries');
   }
-  if(git('status','--porcelain','--untracked-files=all')) fail('source is dirty');
-  return {commit:git('rev-parse','HEAD'),tree:git('rev-parse','HEAD^{tree}')};
+  if(git(['status','--porcelain','--untracked-files=all'])) fail('source is dirty');
+  return {commit:git(['rev-parse','HEAD']),tree:git(['rev-parse','HEAD^{tree}'])};
 }
 const gates = [
   {name:'production',runtime:'normal',args:['--test','--test-name-pattern=MANDATORY protected offline production','agents/scripts/host-approval-service.test.mjs']},

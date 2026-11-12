@@ -77,7 +77,7 @@ function sourceFixture(t) {
   t.after(()=>fs.rmSync(dir,{recursive:true,force:true}));
   const env={PATH:'/usr/bin:/bin',LANG:'C',LC_ALL:'C',GIT_CONFIG_NOSYSTEM:'1',GIT_CONFIG_GLOBAL:'/dev/null',GIT_OPTIONAL_LOCKS:'0'};
   const git=(...args)=>{
-    const r=spawnSync('/usr/bin/git',['-C',dir,...args],{env,timeout:10000});
+    const r=spawnSync('/usr/bin/git',['-c','core.fsmonitor=false','-c','core.hooksPath=/dev/null','-C',dir,...args],{env,timeout:10000});
     assert.ifError(r.error);assert.equal(r.status,0,r.stderr.toString());return r.stdout;
   };
   git('init','--quiet');
@@ -91,10 +91,10 @@ function sourceFixture(t) {
   const facade={...fs,readFileSync:(p,...args)=>p==='/proc/self/mountinfo'
     ? `1 0 0:1 / ${dir} ro - synthetic synthetic ro\n`
     : fs.readFileSync(p,...args)};
-  const admit=()=>vm.runInNewContext(admission+'\nsource(target)',{
-    fs:facade,path,crypto:{createHash},spawnSync,process:{env:{}},target:dir,
+  const admit=(inherited={},observe=()=>{})=>vm.runInNewContext(admission+'\nsource(target)',{
+    fs:facade,path,crypto:{createHash},spawnSync:(bin,args,options)=>{observe(bin,args,options);return spawnSync(bin,args,options);},process:{env:inherited},target:dir,
   },{timeout:10000});
-  const snapshot=()=>({index:fs.readFileSync(path.join(dir,'.git/index')),tags:git('ls-files','-v','-z'),files:[ordinary,hostile].map(p=>fs.readFileSync(path.join(dir,p)))});
+  const snapshot=()=>({config:fs.readFileSync(path.join(dir,'.git/config')),worktreeConfig:fs.existsSync(path.join(dir,'.git/config.worktree'))?fs.readFileSync(path.join(dir,'.git/config.worktree')):null,index:fs.readFileSync(path.join(dir,'.git/index')),files:[ordinary,hostile,'.gitattributes'].filter(p=>fs.existsSync(path.join(dir,p))).map(p=>[p,fs.readFileSync(path.join(dir,p))])});
   return {dir,git,ordinary,hostile,admit,snapshot};
 }
 test('real-Git ordinary clean index admits exact identity without rewriting state',t=>{
@@ -113,7 +113,7 @@ for(const flag of ['assume-unchanged','skip-worktree']) {
       assert.equal(f.git('status','--porcelain','--untracked-files=all').length,0);
       const identity=f.git('rev-parse','HEAD','HEAD^{tree}'),before=f.snapshot();
       const tag=flag==='assume-unchanged'?'h':'S';
-      assert(before.tags.includes(Buffer.from(tag+' '+file+'\0')));
+      assert(f.git('ls-files','-v','-z').includes(Buffer.from(tag+' '+file+'\0')));
       assert.throws(f.admit,/source index has assume-unchanged or skip-worktree entries/);
       assert.deepEqual(f.snapshot(),before);
       assert.deepEqual(f.git('rev-parse','HEAD','HEAD^{tree}'),identity);
@@ -124,7 +124,92 @@ test('real-Git combined index bits reject and remain set even without an edit',t
   const f=sourceFixture(t);
   f.git('update-index','--assume-unchanged','--',f.hostile);
   f.git('update-index','--skip-worktree','--',f.hostile);
-  const before=f.snapshot();assert(before.tags.includes(Buffer.from('s '+f.hostile+'\0')));
+  const before=f.snapshot();assert(f.git('ls-files','-v','-z').includes(Buffer.from('s '+f.hostile+'\0')));
   assert.throws(f.admit,/source index has assume-unchanged or skip-worktree entries/);
   assert.deepEqual(f.snapshot(),before);
+});
+
+function markerFixture(t) {
+  const f=sourceFixture(t);
+  // Separate from source, which the admission fixture projects as read-only.
+  const scratch=fs.mkdtempSync(path.join(os.tmpdir(),'qualification-command-'));
+  t.after(()=>fs.rmSync(scratch,{recursive:true,force:true}));
+  const marker=path.join(scratch,'marker'),helper=path.join(scratch,'helper.sh');
+  fs.writeFileSync(helper,'printf executed > "$1"\nprintf "token\\n\\0"\n');
+  // Explicit interpreter works even on noexec scratch; prove the marker can fire.
+  const control=spawnSync('/bin/sh',[helper,marker]);assert.equal(control.status,0);
+  assert.equal(fs.readFileSync(marker,'utf8'),'executed');fs.unlinkSync(marker);
+  const command=`/bin/sh ${helper} ${marker}`;
+  const reject=()=>{
+    const before=f.snapshot(),calls=[];
+    assert.throws(()=>f.admit({},(bin,args)=>calls.push({bin,args})),/unsafe or malformed source configuration/);
+    assert.equal(fs.existsSync(marker),false,'no config command executed');
+    assert.deepEqual(f.snapshot(),before,'config/index/bits/tracked source preserved');
+    assert.equal(calls.length,1,'rejected by config audit before any index/status operation');
+    assert.equal(calls[0].bin,'/usr/bin/git');
+    assert.deepEqual(Array.from(calls[0].args).slice(-5),['config','--local','--no-includes','--null','--list']);
+  };
+  return {...f,scratch,marker,command,reject};
+}
+for(const key of ['core.fsmonitor','CoRe.FsMoNiToR','core.hooksPath','core.sshCommand','core.editor','core.pager','sequence.editor','pager.status','alias.status','credential.helper','credential.https://example.invalid.helper','diff.external','diff.evil.command','diff.evil.textconv','difftool.evil.cmd','mergetool.evil.cmd','merge.evil.driver','interactive.diffFilter','core.attributesFile','filter.evil.clean','filter.evil.smudge','filter.evil.process','filter.evil.required']) {
+  test(`real-Git rejects command/import config ${key} before marker execution without mutation`,t=>{
+    const f=markerFixture(t);f.git('config','--local',key,key==='filter.evil.required'?'true':f.command);f.reject();
+  });
+}
+for(const family of ['clean','process']) {
+  test(`real-Git tracked attributes and local filter ${family} reject before helper execution`,t=>{
+    const f=markerFixture(t);
+    fs.writeFileSync(path.join(f.dir,'.gitattributes'),'*.mjs filter=evil\n');
+    f.git('add','--','.gitattributes');
+    f.git('-c','user.name=Fixture','-c','user.email=fixture@example.invalid','commit','--quiet','-m','tracked attributes');
+    f.git('config','--local','filter.evil.'+family,f.command);
+    f.git('config','--local','filter.evil.required','true');
+    f.reject();
+  });
+}
+for(const key of ['include.path','includeIf.gitdir:/.path','InClUdE.path']) {
+  test(`real-Git rejects ${key} without following external configuration`,t=>{
+    const f=markerFixture(t),external=path.join(f.scratch,'external.config');
+    fs.writeFileSync(external,`[core]\n fsmonitor = ${f.command}\n[filter "evil"]\n clean = ${f.command}\n`);
+    f.git('config','--local',key,external);const bytes=fs.readFileSync(external);f.reject();
+    assert.deepEqual(fs.readFileSync(external),bytes);
+    // A malformed included file would abort Git if --no-includes were absent.
+    fs.writeFileSync(external,'[invalid included config\n');f.reject();
+  });
+}
+test('real-Git worktree-specific configuration is rejected at enablement',t=>{
+  const f=markerFixture(t);f.git('config','--local','extensions.worktreeConfig','true');
+  fs.writeFileSync(path.join(f.dir,'.git/config.worktree'),`[CoRe]\n FsMoNiToR = ${f.command}\n[filter "evil"]\n process = ${f.command}\n`);
+  f.reject();
+});
+test('real-Git external system/global/XDG/environment config injection is isolated on every call',t=>{
+  const f=markerFixture(t),home=path.join(f.scratch,'home'),xdg=path.join(f.scratch,'xdg');
+  fs.mkdirSync(home);fs.mkdirSync(path.join(xdg,'git'),{recursive:true});
+  const config=`[core]\n fsmonitor = ${f.command}\n[filter "evil"]\n clean = ${f.command}\n`;
+  const system=path.join(f.scratch,'system.config'),global=path.join(f.scratch,'global.config');
+  for(const p of [system,global,path.join(home,'.gitconfig'),path.join(xdg,'git/config')])fs.writeFileSync(p,config);
+  const inherited={HOME:home,XDG_CONFIG_HOME:xdg,GIT_CONFIG_SYSTEM:system,GIT_CONFIG_GLOBAL:global,GIT_CONFIG_NOSYSTEM:'0',GIT_CONFIG_COUNT:'1',GIT_CONFIG_KEY_0:'core.fsmonitor',GIT_CONFIG_VALUE_0:f.command,GIT_CONFIG_PARAMETERS:`'core.fsmonitor=${f.command}'`,GIT_ATTR_NOSYSTEM:'0',GIT_TERMINAL_PROMPT:'1',GIT_EXEC_PATH:f.scratch};
+  const before=f.snapshot(),calls=[];
+  const state=f.admit(inherited,(bin,args,options)=>{
+    assert.equal(bin,'/usr/bin/git');assert.equal(options.env.GIT_CONFIG_NOSYSTEM,'1');assert.equal(options.env.GIT_CONFIG_GLOBAL,'/dev/null');
+    assert.equal(options.env.GIT_ATTR_NOSYSTEM,'1');assert.equal(options.env.GIT_TERMINAL_PROMPT,'0');
+    assert.equal(options.env.HOME,'/dev/null');assert.equal(options.env.XDG_CONFIG_HOME,'/dev/null');
+    for(const k of ['GIT_CONFIG_SYSTEM','GIT_CONFIG_COUNT','GIT_CONFIG_KEY_0','GIT_CONFIG_VALUE_0','GIT_CONFIG_PARAMETERS','GIT_EXEC_PATH'])assert.equal(Object.hasOwn(options.env,k),false,k);
+    for(const control of ['core.fsmonitor=false','core.hooksPath=/dev/null','core.attributesFile=/dev/null'])assert(args.includes(control),control);
+    assert(args.includes('--no-pager'));calls.push(args);
+  });
+  assert.equal(state.commit,f.git('rev-parse','HEAD').toString().trim());assert.equal(calls.length,5);
+  assert.equal(fs.existsSync(f.marker),false);assert.deepEqual(f.snapshot(),before);
+});
+test('real-Git ordinary clone and identity structure remains admissible with hostile config values inert',t=>{
+  const f=markerFixture(t);
+  for(const [key,value] of [['remote.origin.url','https://example.invalid/source.git'],['remote.origin.fetch','+refs/heads/*:refs/remotes/origin/*'],['branch.main.remote','origin'],['branch.main.merge','refs/heads/main'],['user.name','Fixture\ncore.fsmonitor='+f.command],['user.email','fixture@example.invalid'],['user.useConfigOnly','true']])f.git('config','--local',key,value);
+  const before=f.snapshot();f.admit();assert.equal(fs.existsSync(f.marker),false);assert.deepEqual(f.snapshot(),before);
+});
+test('malformed repository-local config fails closed before any worktree helper',t=>{
+  const f=markerFixture(t);fs.appendFileSync(path.join(f.dir,'.git/config'),'\n[invalid syntax\n');
+  const config=fs.readFileSync(path.join(f.dir,'.git/config')),index=fs.readFileSync(path.join(f.dir,'.git/index'));
+  assert.throws(f.admit,/prerequisite command failed/);assert.equal(fs.existsSync(f.marker),false);
+  assert.deepEqual(fs.readFileSync(path.join(f.dir,'.git/config')),config);assert.deepEqual(fs.readFileSync(path.join(f.dir,'.git/index')),index);
+  for(const file of [f.ordinary,f.hostile])assert.equal(fs.readFileSync(path.join(f.dir,file),'utf8'),'reviewed bytes\n');
 });
