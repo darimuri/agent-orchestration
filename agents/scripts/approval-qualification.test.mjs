@@ -218,7 +218,7 @@ test('malformed repository-local config fails closed before any worktree helper'
 // Pure contracts are loaded verbatim; no production path/binary override exists.
 function diagnosticFunctions(extra={}) {
   const sh=fs.readFileSync(script,'utf8'),code=sh.slice(sh.indexOf('// Explicit diagnostic only:'),sh.indexOf('async function main()'));
-  return vm.runInNewContext(code+'\n({diagnosticText,diagnosticTokens,diagnosticResponse,diagnosticObjectReference,diagnosticOutcome,diagnosticFamily,diagnosticProbe,diagnose,diagnosticFlags,comdatHeader,comdatMain})',{
+  return vm.runInNewContext(code+'\n({diagnosticText,diagnosticEvidence,diagnosticEvidenceCheck,diagnosticTokens,diagnosticResponse,diagnosticObjectReference,diagnosticOutcome,diagnosticFamily,diagnosticProbe,diagnose,diagnosticFlags,comdatHeader,comdatMain})',{
     fs,path,Buffer,setTimeout,clearTimeout,crypto:{createHash},hash:p=>createHash('sha256').update(fs.readFileSync(p)).digest('hex'),fail:m=>{throw Error(m);},fixed:{PATH:'/usr/bin:/bin'},process:{env:{},getuid:()=>process.getuid()},spawn,...extra,
   });
 }
@@ -280,17 +280,18 @@ test('MANDATORY real GCC multi-TU COMDAT/ASan/UBSan diagnostic fixture',async t=
 
 // Full diagnostic state-machine fixture. Binaries/tool inventory/read-only mounts
 // are explicit facades here; emitted compiler/ELF text is synthetic, not native PASS.
-async function syntheticDiagnostic(t,variant) {
+async function syntheticDiagnostic(t,variant,linkEvidence={}) {
   const f=fixture(t),output=path.join(f.dir,'out'),failed=path.join(f.dir,'failed'),lockPath=path.join(f.dir,'lock');
   fs.mkdirSync(output,{mode:0o700});fs.mkdirSync(failed);fs.writeFileSync(lockPath,'synthetic');
   const lockSha='0dbfd0064f4afbd32ceef751d3d1b75685f8a511cd50d394b21232d02ff29307',archiveSha='a7f6204ff63b6a2cd274d48903285abb86ed53a99070e532d4c2fd787457d9e6';
   const lock={...f.lock,gccVersion:'13.3.0',nodeSourceSha256:archiveSha,builderImage:'example.invalid/builder@sha256:b2ed7cea3b936b4054afd8157944dffc0110ae61988b3644716ddaef5214ed31'};
   if(variant!=='missing-object') {
     fs.writeFileSync(path.join(failed,'wasm-disassembler.o'),'synthetic object');
-    const response=['response','nested-response','response-positive'].includes(variant);fs.writeFileSync(path.join(failed,'link.json'),JSON.stringify(['/usr/bin/g++',response?'@link.rsp':variant==='unrelated-object'?'unrelated.o':'wasm-disassembler.o','-o','mksnapshot']));
+    const response=Object.hasOwn(linkEvidence,'response')||['response','nested-response','response-positive'].includes(variant);fs.writeFileSync(path.join(failed,'link.json'),JSON.stringify(linkEvidence.argv??['/usr/bin/g++',response?'@link.rsp':variant==='unrelated-object'?'unrelated.o':'wasm-disassembler.o','-o','mksnapshot']));
     fs.writeFileSync(path.join(failed,'diagnostic-inputs.json'),JSON.stringify({schema:'buzz.gcc-comdat-evidence/v1',lockSha256:lockSha,archiveSha256:archiveSha,object:'wasm-disassembler.o',linkArgv:'link.json',...(response?{responseFile:'link.rsp'}:{})}));
-    if(response)fs.writeFileSync(path.join(failed,'link.rsp'),variant==='nested-response'?'@other.rsp':variant==='response-positive'?'wasm-disassembler.o':'"malformed unclosed quote');
+    if(response)fs.writeFileSync(path.join(failed,'link.rsp'),linkEvidence.response??(variant==='nested-response'?'@other.rsp':variant==='response-positive'?'wasm-disassembler.o':'"malformed unclosed quote'));
   }
+  linkEvidence.prepare?.({failed,output,root:f.dir});
   const virtual=new Set(['/usr/bin/cc','/usr/bin/g++','/usr/bin/as','/usr/bin/ld','/usr/bin/objdump','/fixed/gcc','/fixed/g++','/fixed/libasan.so.8','/fixed/libubsan.so.1','/fixed/mixed.so','/fixed/libstdc++.so.6','/fixed/libgcc_s.so.1','/usr/lib/gcc/fixture/cc1plus','/usr/lib/gcc/fixture/collect2']);
   const realpath=p=>p==='/usr/bin/cc'?'/fixed/gcc':p==='/usr/bin/g++'?'/fixed/g++':virtual.has(p)?p:fs.realpathSync(p);
   const facade={...fs,realpathSync:realpath,statSync:p=>virtual.has(p)?{isFile:()=>true}:fs.statSync(p)};
@@ -302,6 +303,7 @@ async function syntheticDiagnostic(t,variant) {
     child=new EventEmitter();child.pid=123;child.stdout=new EventEmitter();child.stderr=new EventEmitter();const cp=child;
     queueMicrotask(()=>{
       if(variant==='timeout')return;
+      if(bin==='/usr/bin/readelf' && args.at(-1)===path.join(output,'failed-object.o'))linkEvidence.inspect?.({failed,output,args});
       let out='',err='',code=0;
       if(args[0]==='--version')out=bin.endsWith('objdump')?'GNU objdump synthetic':bin.endsWith('/as')?'GNU assembler synthetic':bin.endsWith('/ld')?'GNU ld synthetic':'gcc 13.3.0 Free Software Foundation';
       else if(args[0]==='-dumpfullversion')out='13.3.0';
@@ -344,8 +346,142 @@ test('captured object correlation accepts exact input only, rejects unrelated, o
   const d=diagnosticFunctions(),object='out/wasm-disassembler.o';
   d.diagnosticObjectReference(object,['/usr/bin/g++',object,'-o','mksnapshot'],[]);
   d.diagnosticObjectReference(object,['/usr/bin/g++','@link.rsp','-o','mksnapshot'],[object]);
-  for(const args of [['/usr/bin/g++','unrelated.o','-o','mksnapshot'],['/usr/bin/g++','-T',object,'other.o','-o','mksnapshot'],['/usr/bin/g++','-Wl,'+object,'other.o','-o','mksnapshot'],['/usr/bin/g++',object,object,'-o','mksnapshot'],['/usr/bin/g++','out/./wasm-disassembler.o','-o','mksnapshot']])assert.throws(()=>d.diagnosticObjectReference(object,args,[]));
+  for(const args of [['/usr/bin/g++','unrelated.o','-o','mksnapshot'],['/usr/bin/g++','-T',object,'other.o','-o','mksnapshot'],['/usr/bin/g++',object,object,'-o','mksnapshot'],['/usr/bin/g++','out/./wasm-disassembler.o','-o','mksnapshot']])assert.throws(()=>d.diagnosticObjectReference(object,args,[]));
   assert.throws(()=>d.diagnosticObjectReference('out/./wasm-disassembler.o',['/usr/bin/g++','out/./wasm-disassembler.o','-o','mksnapshot'],[]),/noncanonical/);
   assert.throws(()=>d.diagnosticResponse('wasm-disassembler.o @other.rsp'));
 });
 test('synthetic verified response contains the exact preserved object input',async t=>{const r=await syntheticDiagnostic(t,'response-positive');assert.equal(r.status,'DIAGNOSTIC_ONLY_PENDING_REVIEW');});
+
+// Independent-style transport vectors: expected results are explicit, not
+// generated from parser options. Captured arguments remain data throughout.
+const linkerObject='out/wasm-disassembler.o';
+const validLinkerCaptures=[
+  {name:'one direct input',args:[linkerObject]},
+  {name:'one verified response input',args:['@link.rsp'],response:[linkerObject]},
+  {name:'one comma-forwarded input',args:['-Wl,'+linkerObject]},
+  {name:'forwarded group inputs',args:['-Wl,--start-group,out/other.o,'+linkerObject+',--end-group']},
+  {name:'response forwards one input',args:['@link.rsp'],response:['-Wl,'+linkerObject]},
+  {name:'libraries and distinct forwarded paths',args:['out/other.o','-Wl,lib/helper.a,'+linkerObject+',-z,noexecstack,-L,/usr/lib,-l,stdc++','-lpthread']},
+  {name:'whole archive with distinct object',args:['-Wl,--whole-archive,lib/helper.a,--no-whole-archive',linkerObject]},
+];
+for(const c of validLinkerCaptures)test('linker capture accepts '+c.name,()=>{
+  diagnosticFunctions().diagnosticObjectReference(linkerObject,['/usr/bin/g++',...c.args,'-o','mksnapshot'],c.response??[]);
+});
+const invalidLinkerCaptures=[
+  {name:'reported hidden response with direct object',args:[linkerObject,'-Wl,@hidden.rsp']},
+  {name:'hidden response amid forwarded options',args:[linkerObject,'-Wl,--start-group,@hidden.rsp,--end-group']},
+  {name:'Xlinker response operand',args:[linkerObject,'-Xlinker','@hidden.rsp']},
+  {name:'Xlinker embedded response operand',args:[linkerObject,'-Xlinker=@hidden.rsp']},
+  {name:'unsupported Xlinker input transport',args:['-Xlinker',linkerObject]},
+  {name:'top-level alias duplicate',args:[linkerObject,'out/./wasm-disassembler.o']},
+  {name:'forwarded alias duplicate',args:[linkerObject,'-Wl,out/./wasm-disassembler.o']},
+  {name:'response alias duplicate',args:['@link.rsp'],response:[linkerObject,'out/./wasm-disassembler.o']},
+  {name:'mixed direct-forwarded duplicate',args:[linkerObject,'-Wl,'+linkerObject]},
+  {name:'mixed direct-response duplicate',args:[linkerObject,'@link.rsp'],response:[linkerObject]},
+  {name:'multiple forwarded duplicates',args:['-Wl,'+linkerObject+','+linkerObject]},
+  {name:'response-forwarded duplicate',args:['@link.rsp'],response:[linkerObject,'-Wl,'+linkerObject]},
+  {name:'response embeds hidden forwarding',args:['@link.rsp'],response:[linkerObject,'-Wl,@hidden.rsp']},
+  {name:'response nests a top-level reference',args:['@link.rsp'],response:[linkerObject,'@nested.rsp']},
+  {name:'unrelated alias is also rejected',args:[linkerObject,'out/../other.o']},
+  {name:'empty input path component',args:[linkerObject,'out//other.o']},
+  {name:'forwarded traversal input',args:['-Wl,out/../out/wasm-disassembler.o']},
+  {name:'ambiguous same-basename path',args:[linkerObject,'other/wasm-disassembler.o']},
+  {name:'repeated explicit library path',args:[linkerObject,'lib/a.a','-Wl,lib/a.a']},
+  {name:'absolute candidate input unsupported',args:[linkerObject,'/out/other.o']},
+  {name:'missing comma payload',args:[linkerObject,'-Wl,']},
+  {name:'missing comma transport',args:[linkerObject,'-Wl']},
+  {name:'empty leading comma field',args:[linkerObject,'-Wl,,out/other.o']},
+  {name:'empty trailing comma field',args:[linkerObject,'-Wl,out/other.o,']},
+  {name:'unrecognized forwarded option',args:[linkerObject,'-Wl,--unknown,out/other.o']},
+  {name:'forwarded output operand unsupported',args:[linkerObject,'-Wl,-o,mksnapshot']},
+  {name:'forwarded script may import inputs',args:[linkerObject,'-Wl,--script,input.ld']},
+  {name:'driver specs may import inputs',args:[linkerObject,'-specs=inputs.specs']},
+  {name:'library exact-filename input unsupported',args:[linkerObject,'-Wl,-l:wasm-disassembler.o']},
+  {name:'forwarded flag substring is not an input',args:['-Wl,--defsym,x='+linkerObject]},
+  {name:'missing forwarded option operand',args:[linkerObject,'-Wl,-z']},
+  {name:'input cannot be a z operand',args:[linkerObject,'-Wl,-z,'+linkerObject]},
+  {name:'unterminated forwarded group',args:['-Wl,--start-group,'+linkerObject]},
+  {name:'unmatched forwarded group end',args:[linkerObject,'-Wl,--end-group']},
+  {name:'nested forwarded groups unsupported',args:['-Wl,--start-group,--start-group,'+linkerObject+',--end-group,--end-group']},
+  {name:'multiple top-level response files',args:['@one.rsp','@two.rsp'],response:[linkerObject]},
+  {name:'response path alias',args:['@out/./link.rsp'],response:[linkerObject]},
+  {name:'unexpected response tokens',args:[linkerObject],response:['other.o']},
+  {name:'missing verified response tokens',args:['@link.rsp']},
+];
+for(const c of invalidLinkerCaptures)test('linker capture rejects '+c.name,()=>{
+  assert.throws(()=>diagnosticFunctions().diagnosticObjectReference(linkerObject,['/usr/bin/g++',...c.args,'-o','mksnapshot'],c.response??[]));
+});
+for(const [name,evidence,valid] of [
+  ['direct hidden response',{argv:['/usr/bin/g++','wasm-disassembler.o','-Wl,@hidden.rsp','-o','mksnapshot']},false],
+  ['top-level alias duplicate',{argv:['/usr/bin/g++','wasm-disassembler.o','./wasm-disassembler.o','-o','mksnapshot']},false],
+  ['response alias duplicate',{argv:['/usr/bin/g++','@link.rsp','-o','mksnapshot'],response:'wasm-disassembler.o ./wasm-disassembler.o'},false],
+  ['mixed forwarded duplicate',{argv:['/usr/bin/g++','wasm-disassembler.o','-Wl,wasm-disassembler.o','-o','mksnapshot']},false],
+  ['one forwarded group object',{argv:['/usr/bin/g++','-Wl,--start-group,wasm-disassembler.o,--end-group','-o','mksnapshot']},true],
+  ['response forwards exactly one',{argv:['/usr/bin/g++','@link.rsp','-o','mksnapshot'],response:'-Wl,wasm-disassembler.o'},true],
+])test('synthetic runner enforces linker correlation: '+name,async t=>{
+  const r=await syntheticDiagnostic(t,'capture',evidence);assert.equal(r.status,valid?'DIAGNOSTIC_ONLY_PENDING_REVIEW':'BLOCKED');
+  if(!valid)assert(!r.commands.some(c=>c.label.startsWith('v8-')||c.label.startsWith('compile-')),'bad captured evidence rejected before inspection/compilation');
+});
+
+test('supplied evidence admits a stable single-link file without changing its bytes or identity',t=>{
+  const f=fixture(t),p=path.join(f.dir,'evidence');fs.writeFileSync(p,'stable bytes');const d=diagnosticFunctions(),before=fs.statSync(p,{bigint:true});
+  const snapshot=d.diagnosticEvidence(p,64);assert.equal(snapshot.bytes.toString(),'stable bytes');assert.equal(snapshot.identity.nlink,'1');
+  d.diagnosticEvidenceCheck(p,64,snapshot.identity);d.diagnosticEvidence(p,64,snapshot);
+  const after=fs.statSync(p,{bigint:true});for(const k of ['dev','ino','mode','size','nlink','mtimeNs','ctimeNs'])assert.equal(after[k],before[k]);
+  assert.equal(fs.readFileSync(p,'utf8'),'stable bytes');
+});
+test('real outside-projection hardlink mutation is rejected; generated/internal text retains its separate policy',t=>{
+  const f=fixture(t),projection=path.join(f.dir,'projection');fs.mkdirSync(projection);const p=path.join(projection,'object'),outside=path.join(f.dir,'outside');
+  fs.writeFileSync(p,'original');fs.linkSync(p,outside);assert.equal(fs.statSync(p).nlink,2);fs.writeFileSync(outside,'altered!');assert.equal(fs.readFileSync(p,'utf8'),'altered!');
+  const d=diagnosticFunctions();assert.throws(()=>d.diagnosticEvidence(p,64),/unsafe supplied/);assert.equal(fs.readFileSync(p,'utf8'),'altered!');assert.equal(fs.statSync(p).nlink,2);
+  // This generic helper serves fresh internally generated maps, not supplied data.
+  assert.equal(d.diagnosticText(p,64),'altered!');
+});
+test('supplied evidence rejects symlinks, nonregular, oversize and stale snapshots',t=>{
+  const f=fixture(t),p=path.join(f.dir,'file'),link=path.join(f.dir,'symlink');fs.writeFileSync(p,'abc');fs.symlinkSync(p,link);const d=diagnosticFunctions();
+  assert.throws(()=>d.diagnosticEvidence(link,64),/unsafe/);assert.throws(()=>d.diagnosticEvidence(f.dir,64),/unsafe/);assert.throws(()=>d.diagnosticEvidence(p,2),/unsafe/);
+  const snapshot=d.diagnosticEvidence(p,64);fs.writeFileSync(p,'xyz');fs.utimesSync(p,new Date(0),new Date(1000));
+  assert.throws(()=>d.diagnosticEvidence(p,64,snapshot),/changed/);assert.equal(fs.readFileSync(p,'utf8'),'xyz');
+});
+for(const kind of ['replace','symlink','hardlink','grow','same-size-change','truncate'])test('actual supplied-file '+kind+' during fd inspection is rejected',t=>{
+  const f=fixture(t),p=path.join(f.dir,'file'),sibling=path.join(f.dir,'sibling');fs.writeFileSync(p,'original');let changed=false;
+  const facade={...fs,readSync:(...args)=>{const n=fs.readSync(...args);if(!changed){changed=true;
+    if(kind==='replace'){fs.renameSync(p,sibling);fs.writeFileSync(p,'original');}
+    else if(kind==='symlink'){fs.renameSync(p,sibling);fs.symlinkSync(sibling,p);}
+    else if(kind==='hardlink')fs.linkSync(p,sibling);
+    else if(kind==='grow')fs.appendFileSync(p,' growth');
+    else if(kind==='truncate')fs.truncateSync(p,1);
+    else {fs.writeFileSync(p,'modified');fs.utimesSync(p,new Date(0),new Date(1000));}
+  }return n;}};
+  assert.throws(()=>diagnosticFunctions({fs:facade}).diagnosticEvidence(p,64));assert(changed);
+  if(kind==='replace'||kind==='symlink')assert.equal(fs.readFileSync(sibling,'utf8'),'original');
+  if(kind==='hardlink'){assert.equal(fs.statSync(p).nlink,2);assert.equal(fs.readFileSync(p,'utf8'),'original');}
+});
+test('supplied-file symlink swap immediately before open fails O_NOFOLLOW',t=>{
+  const f=fixture(t),p=path.join(f.dir,'file'),sibling=path.join(f.dir,'old');fs.writeFileSync(p,'original');let changed=false;
+  const facade={...fs,openSync:(file,flags)=>{assert(flags&fs.constants.O_NOFOLLOW);fs.renameSync(p,sibling);fs.symlinkSync(sibling,p);changed=true;return fs.openSync(file,flags);}};
+  assert.throws(()=>diagnosticFunctions({fs:facade}).diagnosticEvidence(p,64));assert(changed);assert.equal(fs.readFileSync(sibling,'utf8'),'original');
+});
+for(const field of ['dev','ino','size','nlink'])test('supplied fd '+field+' identity change is rejected without writing source',t=>{
+  const f=fixture(t),p=path.join(f.dir,'file');fs.writeFileSync(p,'original');let calls=0;
+  const facade={...fs,fstatSync:(...args)=>{const s=fs.fstatSync(...args);calls++;return calls===2?{...s,[field]:s[field]+1n,isFile:()=>true}:s;}};
+  assert.throws(()=>diagnosticFunctions({fs:facade}).diagnosticEvidence(p,64),/changed/);assert.equal(fs.readFileSync(p,'utf8'),'original');
+});
+for(const name of ['diagnostic-inputs.json','wasm-disassembler.o','link.json','link.rsp'])test('runner rejects real hardlinked supplied '+name,async t=>{
+  let observed=false;const r=await syntheticDiagnostic(t,'capture',{
+    argv:['/usr/bin/g++','@link.rsp','-o','mksnapshot'],response:'wasm-disassembler.o',
+    prepare:({failed,root})=>{const p=path.join(failed,name),sibling=path.join(root,'outside-'+name);fs.linkSync(p,sibling);observed=fs.statSync(p).nlink===2;},
+  });
+  assert(observed);assert.equal(r.status,'BLOCKED');assert.match(r.blocker,/unsafe supplied/);assert(!r.commands.some(c=>c.label.startsWith('v8-')||c.label.startsWith('compile-')));
+});
+for(const name of ['diagnostic-inputs.json','wasm-disassembler.o','link.json','link.rsp'])test('runner detects supplied '+name+' mutation during inspection of frozen object',async t=>{
+  let observed=false;const r=await syntheticDiagnostic(t,'capture',{
+    argv:['/usr/bin/g++','@link.rsp','-o','mksnapshot'],response:'wasm-disassembler.o',
+    inspect:({failed,output,args})=>{assert.equal(args.at(-1),path.join(output,'failed-object.o'));assert.equal(fs.readFileSync(args.at(-1),'utf8'),'synthetic object');fs.appendFileSync(path.join(failed,name),' changed');observed=true;},
+  });
+  assert(observed);assert.equal(r.status,'BLOCKED');assert.match(r.blocker,/supplied diagnostic evidence changed/);assert(!r.commands.some(c=>c.label.startsWith('compile-')));
+});
+test('linker parser rejects missing library operands in direct and forwarded argument streams',()=>{
+  const d=diagnosticFunctions(),object='out/wasm-disassembler.o';
+  for(const argv of [['/usr/bin/g++',object,'-o','mksnapshot','-l'],['/usr/bin/g++',object,'-o','mksnapshot','-Wl,-l'],['/usr/bin/g++',object,'-l','-o','mksnapshot']])assert.throws(()=>d.diagnosticObjectReference(object,argv,[]));
+});

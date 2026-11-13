@@ -123,6 +123,39 @@ function diagnosticText(p,limit) {
   const b=fs.readFileSync(p);if(b.length>limit || b.includes(0)) fail('malformed diagnostic text');
   return b.toString('utf8');
 }
+// Supplied failure evidence only. Generated logs/maps and tool/runtime binaries
+// deliberately keep their separate policies (in particular, runtime symlinks).
+function diagnosticEvidenceIdentity(s) {
+  return Object.fromEntries(['dev','ino','mode','uid','gid','size','nlink','mtimeNs','ctimeNs'].map(k=>[k,String(s[k])]));
+}
+function diagnosticEvidenceCheck(p,limit,expected) {
+  const s=fs.lstatSync(p,{bigint:true});
+  if(!s.isFile() || s.nlink!==1n || s.size>BigInt(limit) || fs.realpathSync(p)!==p) fail('unsafe supplied diagnostic evidence');
+  const identity=diagnosticEvidenceIdentity(s);
+  if(expected && JSON.stringify(identity)!==JSON.stringify(expected)) fail('supplied diagnostic evidence changed');
+  return {stat:s,identity};
+}
+function diagnosticEvidence(p,limit,expected) {
+  const before=diagnosticEvidenceCheck(p,limit,expected?.identity);let fd;
+  try {
+    fd=fs.openSync(p,fs.constants.O_RDONLY|fs.constants.O_NOFOLLOW|fs.constants.O_NONBLOCK);
+    const checkFd=()=>{const s=fs.fstatSync(fd,{bigint:true});if(!s.isFile() || s.nlink!==1n || JSON.stringify(diagnosticEvidenceIdentity(s))!==JSON.stringify(before.identity))fail('supplied diagnostic evidence changed during inspection');};
+    checkFd();
+    // A size+1 buffer bounds reads even if a writer grows the opened inode.
+    const buffer=Buffer.alloc(Number(before.stat.size)+1);let count=0;
+    while(count<buffer.length){const n=fs.readSync(fd,buffer,count,buffer.length-count,null);if(!n)break;count+=n;}
+    checkFd();diagnosticEvidenceCheck(p,limit,before.identity);
+    if(count!==Number(before.stat.size))fail('supplied diagnostic evidence size changed');
+    const bytes=buffer.subarray(0,count),sha256=crypto.createHash('sha256').update(bytes).digest('hex');
+    if(expected && sha256!==expected.sha256)fail('supplied diagnostic evidence bytes changed');
+    return {bytes,sha256,identity:before.identity};
+  } finally {if(fd!==undefined)fs.closeSync(fd);}
+}
+function diagnosticEvidenceText(evidence) {
+  const text=evidence.bytes.toString('utf8');
+  if(evidence.bytes.includes(0) || !Buffer.from(text).equals(evidence.bytes))fail('malformed supplied diagnostic text');
+  return text;
+}
 function diagnosticTokens(tokens) {
   if(!Array.isArray(tokens) || !tokens.length || tokens.length>4096 || tokens.some(t=>typeof t!=='string' || !/^[A-Za-z0-9_./+:,=@%-]{1,4096}$/.test(t))) fail('malformed diagnostic argv/response');
   return tokens;
@@ -134,18 +167,74 @@ function diagnosticResponse(text) {
   if(tokens.some(token=>token.includes('@'))) fail('nested diagnostic response reference');
   return tokens; // No quoting, nesting, expansion or execution.
 }
+function diagnosticPath(value,absolute=false) {
+  if(typeof value!=='string' || !/^[A-Za-z0-9_./+-]+$/.test(value) || (!absolute && path.posix.isAbsolute(value)) || path.posix.normalize(value)!==value || value.split('/').slice(value.startsWith('/')?1:0).some(p=>!p||p==='.'||p==='..')) fail('noncanonical diagnostic linker path');
+  return value;
+}
+function diagnosticResponseReferences(argv) {
+  diagnosticTokens(argv);
+  if(argv[0]!=='/usr/bin/g++') fail('unsupported captured linker driver');
+  const refs=[];
+  for(let i=1;i<argv.length;i++) {
+    const token=argv[i];
+    // -Xlinker is intentionally unsupported: never guess how operands nest.
+    if(token.startsWith('-Xlinker')) fail('unsupported captured -Xlinker transport');
+    if(!token.includes('@')) continue;
+    if(!token.startsWith('@') || token.slice(1).includes('@') || ['-o','-L','-l','-T','-u','-z','--script','--sysroot'].includes(argv[i-1])) fail('embedded/nested diagnostic response reference');
+    diagnosticPath(token.slice(1));refs.push(token);
+  }
+  if(refs.length>1) fail('multiple top-level diagnostic responses');
+  return refs;
+}
 function diagnosticObjectReference(object,argv,responseTokens) {
-  if(typeof object!=='string' || path.isAbsolute(object) || path.posix.normalize(object)!==object || object.split('/').some(p=>!p||p==='.'||p==='..')) fail('noncanonical diagnostic object identity');
+  diagnosticPath(object);
+  const refs=diagnosticResponseReferences(argv);
+  if(!Array.isArray(responseTokens) || Boolean(refs.length)!==Boolean(responseTokens.length)) fail('missing/unexpected diagnostic response tokens');
+  if(responseTokens.length){diagnosticTokens(responseTokens);if(responseTokens.some(t=>t.includes('@')))fail('nested diagnostic response reference');}
   const tokens=argv.slice(1).flatMap(t=>t.startsWith('@')?responseTokens:[t]);
-  let references=0,outputs=0;
-  const operands=new Set(['-o','-L','-l','-T','-u','-z','-Xlinker','-x','-B','-I','-isystem','-include','-imacros','-MF','-MT','-MQ','--sysroot','-specs','--script','--entry']);
+  if(tokens.length>4096) fail('expanded diagnostic argument bound exceeded');
+  const seen=new Set();let references=0,outputs=0,expanded=tokens.length,group=false,whole=false;
+  const input=value=>{
+    diagnosticPath(value);
+    if(!/\.(?:o|a|so(?:\.\d+)*)$/.test(value)) fail('unsupported captured linker input');
+    if(seen.has(value)) fail('duplicate diagnostic linker input');seen.add(value);
+    if(value===object) references++;
+    else if(path.posix.basename(value)===path.posix.basename(object)) fail('ambiguous preserved object path');
+  };
+  const library=value=>{if(typeof value!=='string' || !/^[A-Za-z0-9_+][A-Za-z0-9_+-]*$/.test(value))fail('unsupported captured library name');};
+  const linker=parts=>{
+    expanded+=parts.length-1;if(expanded>4096 || parts.some(p=>!p||p.includes('@')))fail('malformed/nested forwarded linker arguments');
+    for(let i=0;i<parts.length;i++) {
+      const token=parts[i];
+      if(token==='--start-group'){if(group)fail('ambiguous linker group');group=true;}
+      else if(token==='--end-group'){if(!group)fail('unmatched linker group');group=false;}
+      else if(token==='--whole-archive'){if(whole)fail('ambiguous whole-archive');whole=true;}
+      else if(token==='--no-whole-archive'){if(!whole)fail('unmatched whole-archive');whole=false;}
+      else if(['--as-needed','--no-as-needed','--gc-sections','--no-gc-sections','--export-dynamic','--no-undefined','--fatal-warnings','--warn-common','--eh-frame-hdr'].includes(token))continue;
+      else if(token==='-z'){if(!['noexecstack','relro','now','lazy','defs','nodelete','text','notext'].includes(parts[++i]))fail('unsupported forwarded -z operand');}
+      else if(token==='-L'){diagnosticPath(parts[++i],true);}
+      else if(token.startsWith('-L'))diagnosticPath(token.slice(2),true);
+      else if(token==='-l')library(parts[++i]);
+      else if(token.startsWith('-l'))library(token.slice(2));
+      else if(token.startsWith('-'))fail('unsupported forwarded linker option');
+      else input(token);
+    }
+  };
+  const driverFlags=new Set(['-pthread','-shared','-pie','-no-pie','-rdynamic','-static','-s','-v','-nostdlib','-nodefaultlibs','-fPIC','-fpic','-fPIE','-fpie','-m64','-m32','-Wall','-Wextra','-Werror','-fno-omit-frame-pointer','-fno-optimize-sibling-calls','-fno-sanitize-recover=all','-fsanitize=address','-fsanitize=undefined','-fsanitize=address,undefined']);
   for(let i=0;i<tokens.length;i++) {
     const token=tokens[i];
-    if(operands.has(token)){const value=tokens[++i];if(!value || value.startsWith('-') || value.includes('@')) fail('malformed captured linker operand');if(token==='-o'){if(path.basename(value)!=='mksnapshot')fail('mksnapshot link output missing');outputs++;}continue;}
-    if(token.startsWith('-')){if(!/^(?:-Wl,.+|-W(?:all|extra|error|no-[A-Za-z0-9-]+)|-f(?:PIC|pic|PIE|pie|no-[A-Za-z0-9-]+|[A-Za-z0-9-]+=.+)|-m(?:32|64|[A-Za-z0-9-]+=.+)|-O[0-3sg]|-g(?:[0-3]|dwarf-[0-9]+)?|-L.+|-l.+|-B.+|-I.+|--sysroot=.+|-pthread|-shared|-pie|-rdynamic|-static|-s|-v|-nostdlib|-nodefaultlibs)$/.test(token))fail('unsupported captured linker option');continue;}
-    if(!/\.(?:o|a|so(?:\.\d+)*)$/.test(token)) fail('unsupported captured linker input');
-    if(token===object)references++;
+    if(token.includes('@') || token.startsWith('-Xlinker'))fail('nested/unsupported linker transport');
+    if(token.startsWith('-Wl,')){linker(token.slice(4).split(','));continue;}
+    if(token==='-o'){const value=diagnosticPath(tokens[++i]);if(path.posix.basename(value)!=='mksnapshot')fail('mksnapshot link output missing');outputs++;continue;}
+    if(token==='-L'){diagnosticPath(tokens[++i],true);continue;}
+    if(token.startsWith('-L')){diagnosticPath(token.slice(2),true);continue;}
+    if(token==='-l'){library(tokens[++i]);continue;}
+    if(token.startsWith('-l')){library(token.slice(2));continue;}
+    if(driverFlags.has(token) || /^-(?:O[0-3sg]|g(?:[0-3]|dwarf-[0-9]+)?)$/.test(token))continue;
+    if(token.startsWith('-'))fail('unsupported captured linker option');
+    input(token);
   }
+  if(group||whole)fail('unterminated forwarded linker group');
   if(outputs!==1 || references!==1) fail('preserved object not uniquely referenced as linker input');
 }
 function diagnosticOutcome(label,r) {
@@ -204,6 +293,9 @@ async function diagnose(lock) {
   const result={schema:'buzz.gcc-comdat-diagnostic/v1',status:'INCOMPLETE',scope:'Toolchain diagnostic only; no Node/V8 compatibility, G0 or AGE20 qualification PASS',liveAcceptance:'NOT_READY',profile:diagnosticProfile,commands:[],artifacts:[],unavailable:['Owner R1/R2 logs and BuildKit filesystem are not supplied by this source checkout.'],reportedFailure:{node:'26.13.1',archiveSha256:'a7f6204ff63b6a2cd274d48903285abb86ed53a99070e532d4c2fd787457d9e6',lockSha256:'0dbfd0064f4afbd32ceef751d3d1b75685f8a511cd50d394b21232d02ff29307',ownerLogSha256:'fb8c7fd9083e60fbc0f6e05157fea15472ceacf845762f1061af11b94f49cbb8',R1:'INCOMPLETE',R2:'ASan mksnapshot link failed; not independently reproduced'}};
   const resultPath=path.join(output,'diagnostic.json');fs.writeFileSync(resultPath,JSON.stringify(result,null,2),{flag:'wx',mode:0o600});
   const save=()=>fs.writeFileSync(resultPath,JSON.stringify(result,null,2));
+  const supplied=[];
+  const verifySupplied=(bytes=false)=>{for(const e of supplied){if(bytes)diagnosticEvidence(e.path,e.limit,e.snapshot);else diagnosticEvidenceCheck(e.path,e.limit,e.snapshot.identity);}};
+  const admitEvidence=(p,limit)=>{verifySupplied();const snapshot=diagnosticEvidence(p,limit);supplied.push({path:p,limit,snapshot});verifySupplied();return snapshot;};
   let retained=0;const deadline=Date.now()+180000;
   const retain=(name,text)=>{
     const bytes=Buffer.byteLength(text);if(bytes>2*1024*1024 || retained+bytes>32*1024*1024) fail('diagnostic evidence bound exceeded');
@@ -211,6 +303,7 @@ async function diagnose(lock) {
   };
   const env={...fixed,CC:'/usr/bin/cc',CXX:'/usr/bin/g++',LINK:'/usr/bin/g++',ASAN_OPTIONS:'detect_leaks=1:halt_on_error=1',UBSAN_OPTIONS:'halt_on_error=1:print_stacktrace=1'};
   async function command(label,bin,args,expected=label) {
+    verifySupplied();
     if(Date.now()>=deadline || result.commands.length>=64) fail('diagnostic deadline/command bound exceeded');
     const record={label,argv:[bin,...args],status:'INCOMPLETE'};result.commands.push(record);save();
     let stdout='',stderr='',bytes=0,bounded=false,timedOut=false,error;
@@ -223,7 +316,7 @@ async function diagnose(lock) {
     const [code,signal]=await new Promise(resolve=>cp.once('close',(code,signal)=>resolve([code,signal])));
     clearTimeout(timer);kill();Object.assign(record,{code,signal,error,timedOut,bounded});
     retain(String(result.commands.length).padStart(2,'0')+'-'+label+'.log',stdout+'\n--- stderr ---\n'+stderr);
-    try{diagnosticOutcome(expected,{stdout,stderr,code,signal,error,timedOut,bounded});record.status='OBSERVED_EXPECTED';}catch(e){record.status='BLOCKED';save();throw e;}save();return stdout.trim();
+    try{verifySupplied();diagnosticOutcome(expected,{stdout,stderr,code,signal,error,timedOut,bounded});record.status='OBSERVED_EXPECTED';}catch(e){record.status='BLOCKED';save();throw e;}save();return stdout.trim();
   }
   const identity=p=>{const realpath=fs.realpathSync(p);if(!fs.statSync(realpath).isFile())fail('missing diagnostic tool/runtime');return {path:realpath,sha256:hash(realpath)};};
   try {
@@ -264,24 +357,31 @@ async function diagnose(lock) {
     }
     diagnosticFamily(lock,identities);result.identities=identities;save();
     // Evidence files are data only. Never execute or replay owner-recorded argv.
-    const request=JSON.parse(diagnosticText(path.join(target,'diagnostic-inputs.json'),65536));
+    const descriptor=admitEvidence(path.join(target,'diagnostic-inputs.json'),65536);
+    const request=JSON.parse(diagnosticEvidenceText(descriptor));
     if(request.schema!=='buzz.gcc-comdat-evidence/v1' || request.lockSha256!==hash(lockPath) || request.archiveSha256!==lock.nodeSourceSha256)fail('diagnostic evidence identity mismatch');
     const evidencePath=rel=>{if(typeof rel!=='string' || !/^[A-Za-z0-9_./+-]{1,512}$/.test(rel) || path.isAbsolute(rel) || path.posix.normalize(rel)!==rel || rel.split('/').some(p=>p==='.'||p==='..'||!p))fail('malformed diagnostic evidence path');const p=path.join(target,rel);if(fs.realpathSync(p)!==p || !fs.lstatSync(p).isFile())fail('unavailable diagnostic evidence');return p;};
     const object=evidencePath(request.object),argvFile=evidencePath(request.linkArgv);
     if(path.basename(object)!=='wasm-disassembler.o' || fs.statSync(object).size>64*1024*1024)fail('known V8 object unavailable/bounded');
-    const argv=diagnosticTokens(JSON.parse(diagnosticText(argvFile,65536)));
-    if(argv[0]!=='/usr/bin/g++' || !argv.some(a=>a.endsWith('mksnapshot')) || !argv.some(a=>a.endsWith('.o')||a.startsWith('@')))fail('mksnapshot link argv unavailable');
+    const objectEvidence=admitEvidence(object,64*1024*1024),argvEvidence=admitEvidence(argvFile,65536);
+    const argv=diagnosticTokens(JSON.parse(diagnosticEvidenceText(argvEvidence)));
+    if(argv[0]!=='/usr/bin/g++')fail('mksnapshot link argv unavailable');
     retain('failed-link-argv.json',JSON.stringify(argv,null,2));
-    const refs=argv.filter(a=>a.startsWith('@'));
+    const refs=diagnosticResponseReferences(argv);
     if(refs.length>1 || refs.length!==Number(Boolean(request.responseFile)) || refs.length && refs[0]!=='@'+request.responseFile)fail('malformed/missing response file reference');
     let responseTokens=[];
-    if(request.responseFile){const p=evidencePath(request.responseFile),text=diagnosticText(p,65536);responseTokens=diagnosticResponse(text);retain('failed-link-response.txt',text);}
+    if(request.responseFile){const p=evidencePath(request.responseFile),text=diagnosticEvidenceText(admitEvidence(p,65536));responseTokens=diagnosticResponse(text);retain('failed-link-response.txt',text);}
     diagnosticObjectReference(request.object,argv,responseTokens);
-    result.failedEvidence={object:{relative:request.object,sha256:hash(object)},argv:{relative:request.linkArgv,sha256:hash(argvFile)},requestSha256:hash(path.join(target,'diagnostic-inputs.json'))};result.unavailable=['Raw R1/R2 owner logs remain unavailable; only the supplied failed-object/argv projection is measured.'];save();
-    for(const [label,args] of [['groups',['--section-groups','--wide']],['relocations',['--relocs','--wide']],['symbols',['--symbols','--wide']]])await command('v8-'+label,'/usr/bin/readelf',[...args,object]);
-    await command('v8-objdump','/usr/bin/objdump',['--section-headers','--reloc','--syms',object]);
+    result.failedEvidence={object:{relative:request.object,sha256:objectEvidence.sha256,identity:objectEvidence.identity},argv:{relative:request.linkArgv,sha256:argvEvidence.sha256,identity:argvEvidence.identity},requestSha256:descriptor.sha256,inputs:supplied.map(e=>({relative:path.relative(target,e.path),limit:e.limit,sha256:e.snapshot.sha256,identity:e.snapshot.identity}))};result.unavailable=['Raw R1/R2 owner logs remain unavailable; only the supplied failed-object/argv projection is measured.'];save();
+    verifySupplied(true);
+    const frozenObject=path.join(output,'failed-object.o');fs.writeFileSync(frozenObject,objectEvidence.bytes,{flag:'wx',mode:0o600});
+    result.failedEvidence.snapshot={name:'failed-object.o',bytes:objectEvidence.bytes.length,sha256:objectEvidence.sha256};save();
+    for(const [label,args] of [['groups',['--section-groups','--wide']],['relocations',['--relocs','--wide']],['symbols',['--symbols','--wide']]])await command('v8-'+label,'/usr/bin/readelf',[...args,frozenObject]);
+    await command('v8-objdump','/usr/bin/objdump',['--section-headers','--reloc','--syms',frozenObject]);
+    verifySupplied(true);
     await diagnosticProbe(command,retain,output,identities);
     if(JSON.stringify(source(infrastructure))!==JSON.stringify(result.infrastructure))fail('infrastructure changed during diagnostic');
+    verifySupplied(true);
     result.status='DIAGNOSTIC_ONLY_PENDING_REVIEW';
   } catch(e) {result.status='BLOCKED';result.blocker=e.message;process.exitCode=1;}
   finally {save();}
