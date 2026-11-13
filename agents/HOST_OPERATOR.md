@@ -2139,3 +2139,129 @@ G3/G4 acceptance prerequisites. Missing dependencies/native prerequisites stay
 failures in raw logs. A confirmed source defect needs a separate repair scope;
 do not edit the target to make this dossier pass. No live H1–H9/install/activation
 or production rollout authority follows from this support infrastructure.
+
+### Explicit GCC/COMDAT diagnostic (AGE20; not qualification)
+
+The separate `diagnose-toolchain` command preserves the default `build-runtime`
+configure/make/install semantics. It **never rebuilds Node**, chooses another
+compiler/linker, changes Node flags, or patches Node/V8. Its only selectable
+profile is the explicit `DIAGNOSTIC_PROFILE=gcc-comdat-v1`, fixed GCC/G++ with
+ASan+UBSan. A successful toolchain diagnostic is
+`DIAGNOSTIC_ONLY_PENDING_REVIEW`, never Node/V8 compatibility, G0 admission,
+AGE20 qualification PASS or permission to rebuild. Clang19.1 remains a possible
+future separately approved profile, not a fallback here.
+
+Preserve the owner evidence unchanged: R1 ended INCOMPLETE at the five-hour
+limit without an image. R2 completed normal Node but failed the ASan
+`/build/asan/out/Release/mksnapshot` link: `wasm-disassembler.o` constants were
+referenced by `.data.rel.local..LASAN0` while their COMDAT `.rodata` was discarded;
+GNU ld/collect2 returned1. This is a reported failure, **not an established GCC
+upstream defect**. The source checkout has neither raw owner logs nor the failed
+BuildKit filesystem. Missing original object/argv evidence blocks a complete
+diagnostic; do not infer it from this description.
+
+Owner-reported bindings (verify originals independently; these are not executable
+release locks or substitutes for signature/builder admission):
+
+- source Node v26.13.1 SHA256:
+  `a7f6204ff63b6a2cd274d48903285abb86ed53a99070e532d4c2fd787457d9e6`
+- completed input lock SHA256:
+  `0dbfd0064f4afbd32ceef751d3d1b75685f8a511cd50d394b21232d02ff29307`
+- builder OCI digest:
+  `sha256:b2ed7cea3b936b4054afd8157944dffc0110ae61988b3644716ddaef5214ed31`,
+  linux/amd64, GCC/G++13.3.0, Ubuntu24.04/binutils/libsystemd255
+- R2 owner log SHA256:
+  `fb8c7fd9083e60fbc0f6e05157fea15472ceacf845762f1061af11b94f49cbb8`
+
+Sequence on the owner host:
+
+1. Verify the reviewed diagnostic commit descends from support merge
+   `836350a9ab4e5162b30b91e891eafe1509d1312e` (tree
+   `f5d3081683a9112fe3d6f4026a3eeb5b9e817a62`). Verify the signed archive,
+   completed lock digest, exact builder digest/platform/package inventory and
+   compiler family against the preserved owner evidence. The immutable approval
+   target remains `1312e7a9`; no source/infrastructure identity is substituted.
+2. Preserve R1/R2 logs, statuses and failed filesystem first. In a **new**
+   owner-custodied read-only evidence projection, place the original failed
+   `wasm-disassembler.o`, captured `mksnapshot` link argv JSON array, optional
+   response file and `diagnostic-inputs.json`. Never replay the captured argv.
+   The descriptor has schema `buzz.gcc-comdat-evidence/v1`, `lockSha256`,
+   `archiveSha256`, `object` and `linkArgv` relative paths, plus `responseFile`
+   when the argv contains exactly one matching `@relative/path` reference.
+   No paths may traverse, contain dot aliases or resolve through symlinks. Link argv must start
+   `/usr/bin/g++` and identify exactly one `-o mksnapshot` output. The canonical
+   relative preserved-object path must occur exactly once as a bare linker input
+   in argv or the verified response, never merely as an option operand, flag
+   substring, unrelated object or path alias. Unknown linker options are blocked.
+   Archive/lock bindings must match this run. Do not fabricate absent argv.
+   Capture the original absolute argv separately if it does not fit this bounded
+   relative-response schema; do not silently rewrite evidence to gain admission.
+   The response format deliberately accepts only whitespace-separated simple
+   linker tokens, no quotes, escapes, nested `@`, shell expansion or controls.
+   Complex/unavailable evidence is BLOCKED pending a separately reviewed parser
+   or owner evidence-capture plan.
+3. Run the diagnostic first using the **same admitted prepared builder**, with
+   bootstrap Node, exact existing lock inventory and binutils `objdump`. Do not
+   install anything into it. Use a unique UID10001-owned, executable0700 output
+   on a bounded filesystem; no prior output may be reused. Example shape:
+
+```bash
+# All variables are independently reviewed owner inputs, never agent defaults.
+# Existing builder image is used directly; no Dockerfile or Node image build.
+timeout --signal=TERM --kill-after=10s 5m docker run --name "$UNIQUE_DIAGNOSTIC" \
+  --network=none --read-only --cap-drop=ALL --security-opt=no-new-privileges \
+  --user 10001:10001 --cpus=2 --memory=2g --pids-limit=128 \
+  --env NODE_VERSION --env NODE_SOURCE_SHA256 \
+  --env BUILDER_IMAGE --env QUALIFICATION_PLATFORM \
+  --env DIAGNOSTIC_PROFILE=gcc-comdat-v1 \
+  --mount "type=bind,src=$INFRA_PROJECTION,dst=/infrastructure,readonly" \
+  --mount "type=bind,src=$FAILED_PROJECTION,dst=/failed,readonly" \
+  --mount "type=bind,src=$APPROVED_INPUTS,dst=/inputs,readonly" \
+  --mount "type=bind,src=$FRESH_DIAGNOSTIC_OUTPUT,dst=/output" \
+  --tmpfs /tmp:rw,exec,nosuid,nodev,size=256m,mode=1777 \
+  --entrypoint /bin/bash "$BUILDER_IMAGE" \
+  /infrastructure/agents/scripts/qualify-host-approval.sh diagnose-toolchain \
+  /inputs/qualification-inputs.json /inputs/node.tar.xz \
+  /failed /infrastructure /output
+# On timeout, stop this container only; retain all evidence before removal.
+```
+
+The command checks read-only canonical infrastructure/failed projections, input
+hashes, package inventory and selected GCC/G++ identities. It records tool hashes
+and versions, compiler target, selected assembler/linker paths, GCC cc1plus/collect2 and libstdc++/libgcc/sanitizer
+library identities and ELF build notes/package versions, and loaded probe runtime
+paths/digests. Mismatches fail closed; no compiler, linker or sanitizer fallback
+exists. Reference default Node configure argv is recorded explicitly as **not
+executed**; the effective environment is a fixed allowlist, never an environment
+or credential dump.
+
+The probe uses separate left/right/main C++ translation units with the same
+inline template constant COMDAT definition, compares the merged address/contents,
+and inspects actual section groups and a retained linker map. It also checks
+merged addresses/contents of inline function-local constants. Its explicit diagnostic flags are C++17,
+`-O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined
+-fno-omit-frame-pointer -fno-sanitize-recover=all -v`; they apply only to this
+small probe, never the default Node build. Verbose compile/link streams and
+exact argv are retained. Clean control must return0 with `COMDAT_CLEAN` and no
+sanitizer finding. Expected heap-buffer-overflow ASan and signed-integer-overflow
+UBSan controls must each exit1 with the corresponding report. Silence, an
+unexpected exit/signal, a clean-control finding or a COMDAT compile/link failure
+blocks the diagnostic. Passing the probe does not reproduce or exonerate V8.
+
+For the supplied failed V8 object, bounded `readelf` groups/relocations/symbols
+and `objdump` section/relocation/symbol evidence are retained together with
+captured link argv/response text and source-object digests. `diagnostic.json`
+records actual exits/signals/errors/timeouts, statuses and SHA256/byte counts of
+retained text. Text commands are bounded to20s each,3min total and64 invocations;
+outputs to2MiB per artifact/32MiB total, descriptor/argv/response to64KiB and
+object to64MiB. Exceeding any bound is BLOCKED, not a truncated PASS. Logs and
+partial manifests stay in the new output; prior R1/R2 evidence is never overwritten
+or relabeled. External OOM/container kill may leave INCOMPLETE; the owner must
+retain container exit/OOM/deadline evidence and never promote that to success.
+
+4. Have an independent Reviewer examine the exact source SHA and owner-host
+   evidence, including missing inputs and clean/fault controls. Only then may
+   the owner approve **exactly one** next full-build profile in a separate
+   decision. No full Node rebuild is authorized by diagnostic success. Native
+   strict37/ASan37, dependency-enabled/pinned regressions, provenance and host
+   dossier acceptance remain pending; live H1–H9 remain NOT_READY.
