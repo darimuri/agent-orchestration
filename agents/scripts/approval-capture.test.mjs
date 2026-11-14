@@ -12,7 +12,7 @@ const script=fileURLToPath(new URL('./capture-approval-failure.sh',import.meta.u
 const recorder=fileURLToPath(new URL('./approval-capture-recorder.py',import.meta.url));
 const sh=fs.readFileSync(script,'utf8');
 const js=sh.slice(sh.indexOf("const schema="),sh.indexOf('\ntry{\n  need(['));
-function helpers(extra={}){return vm.runInNewContext(js+'\n({validate,mapping,imageEnvironment,recorderCommand,createArgs,containerIdentity,completion,inventory,ordinary,wrapper,run,storage,docker})',{
+function helpers(extra={}){return vm.runInNewContext(js+'\n({env,dockerConfig,validate,mapping,imageEnvironment,recorderCommand,createArgs,containerIdentity,completion,inventory,ordinary,wrapper,run,storage,docker})',{
   fs,path,crypto,Buffer,setTimeout,clearTimeout,process:{argv:[]},...extra}, {timeout:1000});}
 const digest=b=>crypto.createHash('sha256').update(b).digest('hex');
 function fixture(){
@@ -143,6 +143,14 @@ for(const [label,change]of [
   ['auto remove',c=>c.HostConfig.AutoRemove=true],['security',c=>c.HostConfig.SecurityOpt=['seccomp:unconfined']],['devices',c=>c.HostConfig.Devices=[{}]],
   ['writable source',c=>c.Mounts[0].RW=true],['extra mount',c=>c.Mounts.push({})],['unbounded log',c=>c.HostConfig.LogConfig.Type='json-file'],
 ])test('container readback rejects '+label,()=>{const m=fixture(),c=container(m);change(c);assert.throws(()=>helpers().containerIdentity(m,c));});
+// Explicit custody metadata facade: no root, mounts or Docker are used by tests.
+function custodyFs(control,variant){
+  const config=path.join(control,'docker-config');
+  return {...fs,
+    readFileSync(p,...args){if(p==='/proc/self/mountinfo')return '1 0 1:1 / '+control+' '+(variant==='writable mount'?'rw':'ro')+' - ext4 fixture ro\n'+(variant==='nested writable mount'?'2 1 1:2 / '+config+' rw - ext4 fixture rw\n':'');return fs.readFileSync(p,...args);},
+    lstatSync(p,...args){const st=fs.lstatSync(p,...args);if(p===control||p===config){st.uid=variant==='wrong owner'?10001:0;st.gid=variant==='wrong group'?10001:0;st.mode=(st.mode&~0o777)|((variant==='writable directory'||(variant==='writable control'&&p===control))?0o755:0o555);}return st;}
+  };
+}
 test('Docker attach retains byte-safe relay output within existing stream/text caps',async()=>{
   let payload=Buffer.from([0,255,128,65]);
   const spawn=(bin,args,options)=>{
@@ -150,9 +158,11 @@ test('Docker attach retains byte-safe relay output within existing stream/text c
     const child=new EventEmitter();child.stdout=new EventEmitter();child.stderr=new EventEmitter();child.kill=()=>true;
     queueMicrotask(()=>{child.stdout.emit('data',payload);child.stderr.emit('data',Buffer.from('err'));child.emit('close',0,null);});return child;
   };
-  const h=helpers({spawn});let r=await h.docker(['start','--attach','fixture'],1000,16,true,24);
+  const dir=fs.mkdtempSync(path.join(os.tmpdir(),'capture-docker-'));try{
+  fs.mkdirSync(path.join(dir,'docker-config'));const h=helpers({spawn,fs:custodyFs(dir)});h.env.DOCKER_CONFIG=h.dockerConfig(dir);let r=await h.docker(['start','--attach','fixture'],1000,16,true,24);
   assert.equal(r.error,null);assert.deepEqual(Buffer.from(r.stdoutBase64,'base64'),payload);assert.equal(Buffer.from(r.stderrBase64,'base64').toString(),'err');
   payload=Buffer.alloc(17);r=await h.docker(['start','--attach','fixture'],1000,16,true,24);assert.equal(r.error,'docker output bound');
+  }finally{fs.rmSync(dir,{recursive:true,force:true});}
 });
 test('host collection rejects missing completion, hardlinks, symlinks and mutation',t=>{
   const dir=fs.mkdtempSync(path.join(os.tmpdir(),'capture-host-'));t.after(()=>fs.rmSync(dir,{recursive:true,force:true}));
@@ -222,28 +232,59 @@ test('no-response and ordered duplicate references remain valid controls',t=>{
   for(const args of [[],['@args.rsp','@args.rsp']]){const f=recorded(t);fs.rmSync(f.m.output,{recursive:true});record(f.m,args);assert.equal(helpers().completion(f.m),0);}
 });
 
-async function controllerCompletion(t,mutate){
+async function controllerCompletion(t,mutate,options={}){
   const dir=fs.mkdtempSync(path.join(os.tmpdir(),'capture-complete-controller-'));t.after(()=>fs.rmSync(dir,{recursive:true,force:true}));
   const f=mapped(),m=f.m;for(const k of ['source','control','work','output']){m[k]=path.join(dir,k);fs.mkdirSync(m[k]);}
+  const config=path.join(m.control,'docker-config');fs.mkdirSync(config);
+  if(options.custody==='missing')fs.rmdirSync(config);
+  if(options.custody==='file'){fs.rmdirSync(config);fs.writeFileSync(config,'');}
+  if(options.custody==='symlink'){fs.rmdirSync(config);fs.symlinkSync(m.source,config);}
+  if(options.custody?.startsWith('entry:'))fs.writeFileSync(path.join(config,options.custody.slice(6)),'{}');
   for(const [key,name,raw]of [['repositoryManifest','repo.json',f.repo],['platformManifest','platform.json',f.platform],['configImage','config.json',f.config]]){m[key]=path.join(dir,name);fs.writeFileSync(m[key],raw);}
   fs.writeFileSync(path.join(m.control,'recorder.py'),'synthetic recorder bytes');m.recorderSha256=digest(Buffer.from('synthetic recorder bytes'));
   for(const role of ['cc','cxx','link'])fs.writeFileSync(path.join(m.control,role),helpers().wrapper(role));
-  const stages={m,...record(m)};if(mutate)mutate(stages);
-  const calls=[],fakeDocker=async args=>{
-    calls.push(args);let stdout='';
+  const code=options.code??0,stages={m,...record(m,['@args.rsp'],code)};
+  const streams={stdout:Buffer.from([0,255,128,65]),stderr:Buffer.from([254,0,10,129])};
+  for(const [k,raw]of Object.entries(streams)){fs.writeFileSync(path.join(stages.id,k+'.bin'),raw);stages.end.streams[k]={bytes:raw.length,sha256:digest(raw),relayedBytes:raw.length,relayedSha256:digest(raw)};}
+  stages.flush();if(mutate)mutate(stages);
+  const attached={...streams};if(options.attach)options.attach(attached);
+  if(options.custody==='relative')m.control=path.relative(process.cwd(),m.control);
+  if(options.custody==='alias')m.control=m.control+'/../control';
+  const calls=[],spawn=(bin,argv,opts)=>{
+    assert.equal(bin,'/usr/bin/docker');assert.deepEqual(Array.from(argv.slice(0,2)),['--host','unix:///var/run/docker.sock']);
+    assert.deepEqual({...opts.env},{PATH:'/usr/bin:/bin',LANG:'C',LC_ALL:'C',TZ:'UTC',HOME:'/dev/null',DOCKER_CONFIG:config});
+    const args=argv.slice(2);calls.push(args);let stdout='',stderr='',exit=0;
     if(args[0]==='image')stdout=JSON.stringify([f.image]);
-    if(args[0]==='inspect'){const c=container(m);c.State={Running:false,OOMKilled:false,Error:'',ExitCode:0};stdout=JSON.stringify([c]);}
-    if(args[0]==='wait')stdout='0\n';return {code:0,error:null,signal:null,stdout,stderr:''};
+    if(args[0]==='inspect'){const c=container(m);c.State={Running:false,OOMKilled:false,Error:'',ExitCode:code};stdout=JSON.stringify([c]);}
+    if(args[0]==='wait')stdout=code+'\n';
+    if(args[0]==='start'){stdout=attached.stdout;stderr=attached.stderr;exit=code;}
+    const child=new EventEmitter();child.stdout=new EventEmitter();child.stderr=new EventEmitter();child.kill=()=>true;
+    queueMicrotask(()=>{child.stdout.emit('data',Buffer.from(stdout));child.stderr.emit('data',Buffer.from(stderr));child.emit('close',exit,null);});return child;
   };
-  // These are the same explicit bounded Docker/storage facades used for the
-  // independent false-complete reproduction, not a native container fixture.
-  const body=js.slice(0,js.indexOf('function storage(m){'))+'function storage(m){}\n'+
-    'async function docker(args,timeout,bound){return fakeDocker(args,timeout,bound);}\n'+js.slice(js.indexOf('function ok(r)'));
-  const h=vm.runInNewContext(body+'\n({run})',{fs,path,crypto,Buffer,output:m.output,fakeDocker},{timeout:1000});
-  if(mutate)await assert.rejects(()=>h.run(m),/CAPTURE_INCOMPLETE/);else assert.equal(await h.run(m),0);
-  assert.equal(JSON.parse(fs.readFileSync(path.join(m.output,'seal.json'))).status,mutate?'CAPTURE_INCOMPLETE':'CAPTURE_COMPLETE');
+  // Only storage prerequisites and OS custody metadata are facades. Real run,
+  // Docker transport, completion validation, raw persistence and seal execute.
+  const body=js.slice(0,js.indexOf('function storage(m){'))+'function storage(m){}\n'+js.slice(js.indexOf('function dockerConfig(control){'));
+  const h=vm.runInNewContext(body+'\n({run})',{fs:custodyFs(m.control,options.custody),path,crypto,Buffer,output:m.output,spawn,setTimeout,clearTimeout},{timeout:1000});
+  if(options.custody){await assert.rejects(()=>h.run(m));assert.equal(calls.length,0);assert(!fs.existsSync(path.join(m.output,'host-start.json')));return;}
+  if(mutate||options.attach)await assert.rejects(()=>h.run(m),/CAPTURE_INCOMPLETE/);else assert.equal(await h.run(m),code);
+  const seal=JSON.parse(fs.readFileSync(path.join(m.output,'seal.json')));
+  assert.equal(seal.status,mutate||options.attach?'CAPTURE_INCOMPLETE':'CAPTURE_COMPLETE');assert.equal(seal.workloadExit,code);
+  const saved=JSON.parse(fs.readFileSync(path.join(m.output,'attach.json')));
+  for(const k of ['stdout','stderr'])assert.deepEqual(Buffer.from(saved[k+'Base64'],'base64'),attached[k]);
+  if(options.attach)assert(seal.blocker.startsWith("host attach/spool/relay mismatch"));
   assert.deepEqual(calls.map(x=>x[0]),['image','create','inspect','start','wait','inspect']);
 }
+test('whole controller binary attach/spool/relay equality completes intentional exit7',t=>controllerCompletion(t,null,{code:7}));
+for(const [label,attach]of [
+  ['Docker warning prefix',s=>s.stderr=Buffer.concat([Buffer.from('WARNING: Error loading config file: open /dev/null/config.json: not a directory\n'),s.stderr])],
+  ['extra byte',s=>s.stdout=Buffer.concat([s.stdout,Buffer.from([0])])],
+  ['truncated stderr',s=>s.stderr=s.stderr.subarray(1)],
+  ['missing stdout',s=>s.stdout=Buffer.alloc(0)],
+  ['mutated stdout',s=>s.stdout=Buffer.from([0,255,129,65])],
+  ['swapped streams',s=>[s.stdout,s.stderr]=[s.stderr,s.stdout]],
+])test('whole controller retains raw attach and seals INCOMPLETE for '+label,t=>controllerCompletion(t,null,{code:7,attach}));
+for(const custody of ['missing','file','symlink','relative','alias','wrong owner','wrong group','writable directory','writable control','writable mount','nested writable mount','entry:config.json','entry:auths','entry:contexts','entry:credHelpers','entry:alias','entry:unexpected'])
+  test('whole controller rejects Docker config before Docker: '+custody,t=>controllerCompletion(t,null,{custody}));
 test('whole controller seals COMPLETE for a fully correlated invocation',t=>controllerCompletion(t));
 for(const [label,mutate]of corruptions.filter(([label])=>['missing start','missing spawn','missing completion','missing response metadata','missing response bytes','corrupt response bytes','contradictory exit0/signal9','wrong relay hash'].includes(label)))
   test('whole controller seals INCOMPLETE for '+label,t=>controllerCompletion(t,mutate));
@@ -271,7 +312,7 @@ test('bounded storage/Docker facade executes failed attach→stop→wait→inspe
   // Only these two host boundaries are explicit test facades. Production keeps
   // dedicated ext4 + fixed Docker prerequisites and is never invoked here.
   const body=js.slice(0,js.indexOf('function storage(m){'))+'function storage(m){}\n'+
-    'async function docker(args,timeout,bound){return fakeDocker(args,timeout,bound);}\n'+
+    'function dockerConfig(control){return path.join(control,"docker-config");}\nasync function docker(args,timeout,bound){return fakeDocker(args,timeout,bound);}\n'+
     js.slice(js.indexOf('function ok(r)'));
   const h=vm.runInNewContext(body+'\n({run})',{fs,path,crypto,Buffer,output:m.output,fakeDocker},{timeout:1000});
   await assert.rejects(()=>h.run(m),/CAPTURE_INCOMPLETE/);

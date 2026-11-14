@@ -2323,7 +2323,19 @@ conversion. Core dumps are disabled.
    reviewed recorder source SHA-256. Do not pull an image or rebuild a failed layer.
 2. In fresh control storage copy the reviewed Python bytes as `recorder.py`. Prepare
    the exact manifest and wrappers before projecting the directory read-only. Keep
-   these owner inputs credential-free. Never reuse R1/R2 logs or previous output.
+   these owner inputs credential-free. Prepare an **empty** `docker-config`
+   directory directly under control; use root:root ownership and mode 0555 for
+   control and docker-config before the read-only projection. Do not copy or read
+   the owner's Docker config. No config.json (even empty), auths, credential helper,
+   context, plugin, alias or other entry is admitted. The derived host path is
+   always `<control>/docker-config`; no manifest override is accepted. Both
+   directories must be absolute/canonical real non-symlink directories, root:root,
+   without any write mode bits and covered by read-only mounts (including nested
+   mounts). Missing, writable, nonempty or unexpected custody fails before the
+   first Docker call. Every Docker call revalidates and uses only that explicit
+   DOCKER_CONFIG; HOME stays /dev/null and no owner environment is inherited.
+   This host CLI configuration does not alter recorder FIXED_ENV.
+   Never reuse R1/R2 logs or previous output.
 3. Run `bash agents/scripts/capture-approval-failure.sh plan /absolute/host.json`.
    PLAN_ONLY validates the schema and prints fixed create argv and exact wrapper
    bytes, without Docker or workload execution. It does not verify live image,
@@ -2429,6 +2441,17 @@ Node/V8 behavior are not proven by this synthetic capture. Do not call the drive
 argv an ld argv, reconstruct an execution vector from verbose output, invent object
 inputs or substitute this record for an original R2 reproduction. Any gate requiring
 internal linker argv stops at UNOBSERVED and needs a separately reviewed mechanism.
+
+Before the host seals COMPLETE, each raw attach stdout/stderr stream must have
+exactly the byte count and SHA-256 of the unique top-level workload's retained
+spool and completion relay evidence. Binary bytes, including NUL/non-UTF8, remain
+base64 in attach.json. Prefixes (including Docker CLI warnings), extra bytes,
+truncation, mutation or swapped streams force CAPTURE_INCOMPLETE; raw CLI bytes
+remain unchanged. No warning filtering, stderr suppression or weaker Docker control
+diagnostics are used. A fully correlated intentional exit 7 remains COMPLETE with
+exit 7, without implying workload success. Retained R2 owner evidence stays blocked
+and read-only; this correction does not relabel it. Corrected-SHA real Docker/direct
+replay and external custody proof remain owner gates.
 
 The host keeps create/attach/wait/inspect results and inventories in persistent
 output, checks the created container's image/UID/network/mounts/security/resources

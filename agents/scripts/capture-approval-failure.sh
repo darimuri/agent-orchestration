@@ -8,7 +8,7 @@ import crypto from 'node:crypto';
 import {spawn} from 'node:child_process';
 const [mode, manifestPath, output] = process.argv.slice(2);
 const schema='buzz.approval-capture/v1';
-const env={PATH:'/usr/bin:/bin',LANG:'C',LC_ALL:'C',TZ:'UTC',HOME:'/dev/null',DOCKER_CONFIG:'/dev/null'};
+const env={PATH:'/usr/bin:/bin',LANG:'C',LC_ALL:'C',TZ:'UTC',HOME:'/dev/null',DOCKER_CONFIG:null};
 let hostCancel=null;const activeDocker=new Set();
 const caps={cpus:2,memory:2147483648,pids:128,seconds:900,work:2147483648,output:1073741824,stream:67108864,text:134217728};
 function need(ok,message){if(!ok)throw Error(message);}
@@ -112,7 +112,22 @@ function storage(m){
   need(fs.statSync(m.work).dev!==fs.statSync(m.output).dev,'separate work/output devices');
   for(const p of [m.source,m.control])need(fs.realpathSync(p)===p&&rows.filter(r=>p===r.fields[4]||p.startsWith(r.fields[4]+'/')).sort((a,b)=>b.fields[4].length-a.fields[4].length)[0]?.fields[5].split(',').includes('ro'),'read-only source/control projection');
 }
+function dockerConfig(control){
+  const config=path.join(control,'docker-config');
+  const rows=fs.readFileSync('/proc/self/mountinfo','utf8').trim().split('\n').map(line=>line.split(' - ')[0].split(' '));
+  for(const p of [control,config]){
+    need(path.isAbsolute(p)&&path.resolve(p)===p&&fs.realpathSync(p)===p,'canonical Docker config custody');
+    const st=fs.lstatSync(p);
+    need(st.isDirectory()&&!st.isSymbolicLink()&&st.uid===0&&st.gid===0&&(st.mode&0o222)===0,'root read-only Docker config custody');
+    const mount=rows.filter(r=>p===r[4]||p.startsWith(r[4]==='/'?'/':r[4]+'/')).sort((a,b)=>b[4].length-a[4].length)[0];
+    need(mount?.[5].split(',').includes('ro'),'read-only Docker config projection');
+  }
+  // Empty only: no config.json, auth, helpers, contexts, plugins or aliases.
+  need(fs.readdirSync(config).length===0,'empty credential-free Docker config required');
+  return config;
+}
 async function docker(args,timeout=30000,bound=1048576,raw=false,totalBound=2*bound){
+  need(env.DOCKER_CONFIG===dockerConfig(path.dirname(env.DOCKER_CONFIG??'')),'explicit Docker config required');
   return await new Promise(resolve=>{
     const chunks={stdout:[],stderr:[]},counts={stdout:0,stderr:0};let error=null;
     const child=spawn('/usr/bin/docker',['--host','unix:///var/run/docker.sock',...args],{env,stdio:['ignore','pipe','pipe']});
@@ -154,7 +169,7 @@ function statRecord(item,limit,single=true){
   const i=item.identity;need(Array.isArray(i)&&i.length===7&&i.every(n=>Number.isFinite(n)&&Number.isInteger(n)&&n>=0),'recorded stat identity');
   need(i.slice(0,5).every(Number.isSafeInteger)&&(i[2]&0o170000)===0o100000&&i[3]>0&&(!single||i[3]===1)&&i[4]===item.size,'recorded ordinary identity');
 }
-function completion(m){
+function completion(m,attach){
   const limits=m.recorder.limits,control=ordinary(path.join(m.control,'manifest.json'),1048576);
   const root=path.join(m.output,'records');need(fs.existsSync(root),'missing records');const ids=fs.readdirSync(root);need(ids.length>0&&ids.length<=limits.records,'record count');
   let workload=null;
@@ -197,6 +212,12 @@ function completion(m){
     }
     need(textBytes<=limits.text&&textBytes<=m.resources.text,'aggregate stream bound');
     if(start.role==='workload'){
+      if(attach!==undefined)for(const k of ['stdout','stderr']){
+        const value=attach[k+'Base64'];
+        need(typeof value==='string'&&Buffer.from(value,'base64').toString('base64')===value,'canonical raw attach bytes');
+        const raw=Buffer.from(value,'base64'),stream=end.streams[k];
+        need(raw.length===stream.bytes&&digest(raw)===stream.sha256&&raw.length===stream.relayedBytes&&digest(raw)===stream.relayedSha256,'host attach/spool/relay mismatch '+k);
+      }
       need(workload===null&&JSON.stringify(start.receivedArgvBase64.slice(1))===JSON.stringify(m.fixtureArgvBase64),'workload argv/unique completion');workload=end.returncode;
     }
   }
@@ -205,6 +226,7 @@ function completion(m){
 async function run(m){
   const runDeadline=Date.now()+m.resources.seconds*1000;
   storage(m);need(output===m.output,'explicit output mismatch');
+  env.DOCKER_CONFIG=dockerConfig(m.control);
   const control=JSON.parse(ordinary(path.join(m.control,'manifest.json'),1048576));need(JSON.stringify(control)===JSON.stringify({...m.recorder,fixtureArgvBase64:m.fixtureArgvBase64}),'control manifest mismatch');
   const recorder=ordinary(path.join(m.control,'recorder.py'),1048576);need(digest(recorder)===m.recorderSha256,'reviewed recorder digest');
   // Wrappers are owner-created before read-only projection, not trusted by name.
@@ -222,7 +244,7 @@ async function run(m){
     const wait=await docker(['wait',name]);save(path.join(m.output,'wait.json'),wait);ok(wait);
     final=JSON.parse(ok(await docker(['inspect',name])))[0];containerIdentity(m,final);save(path.join(m.output,'final-inspect.json'),final);
     need(!hostCancel&&!final.State.Running&&!final.State.OOMKilled&&!final.State.Error&&!attach.error&&!attach.signal,'container failure/resource termination');
-    const code=completion(m);need(code===final.State.ExitCode&&String(code)===wait.stdout.trim()&&attach.code===code,'exit/completion mapping');
+    const code=completion(m,attach);need(code===final.State.ExitCode&&String(code)===wait.stdout.trim()&&attach.code===code,'exit/completion mapping');
   }catch(e){blocker=e.message;}
   finally{
     if(created&&!final){const stop=await docker(['stop','--time','2',name]);save(path.join(m.output,'recovery-stop.json'),stop);const read=await docker(['inspect',name]);save(path.join(m.output,'recovery-inspect.json'),read);}
