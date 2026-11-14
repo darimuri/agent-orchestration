@@ -2265,3 +2265,178 @@ retain container exit/OOM/deadline evidence and never promote that to success.
    decision. No full Node rebuild is authorized by diagnostic success. Native
    strict37/ASan37, dependency-enabled/pinned regressions, provenance and host
    dossier acceptance remain pending; live H1–H9 remain NOT_READY.
+
+## AGE #22 / AGE #20 solution 3: durable failure capture (source slice)
+
+This is a NEW instrumentation profile, pending independent exact-SHA review and an
+owner-host synthetic fixture. It is not a Node/V8 build authorization, compatibility
+result, G0–G4 admission, compiler workaround or qualification PASS. Historical R1
+INCOMPLETE and R2 BLOCKED evidence remains unchanged. Original R2 objects/response
+files and owner logs are unavailable to this source job; nothing here reconstructs
+or relabels them. Do not use a passing probe or capture record to select a compiler,
+linker, optimization, snapshot or sanitizer profile. Phase B requires separate owner
+approval of exactly one profile and a measured closure budget.
+
+The new ordinary `100644` sources are `scripts/capture-approval-failure.sh`,
+`scripts/approval-capture-recorder.py`, and `scripts/approval-capture.test.mjs`.
+Run the shell source through bash; do not chmod the checked-in sources. The owner
+runner requires `/usr/bin/node` and `/usr/bin/docker` at those fixed paths. The
+container requires `/usr/bin/python3`; Python is launched with `-I -B -S` to isolate
+startup paths, environment and site hooks. Missing prerequisites fail closed; there
+is no tool/PATH fallback or installation/acquisition step.
+
+### Authority, custody and limits
+
+Validate reviewed support base `5df735447866544d33b3c81ef1471d5779a73c98`, tree
+`f999f7b81dacf6313e78874710d991463c23b0d0`, the exact source/input lock and admitted
+builder before preparing the control projection. The original approval target stays
+`1312e7a9dec6fac055b61993c145be7f6847e216`; this infrastructure does not alter the
+qualification runner/parser or manufacture parser-compatible evidence. The full OCI
+repository manifest/platform/config-image-ID/container `.Image` mapping must be
+available, not a digest prefix. This source work does not recover that missing owner
+mapping. No network access is used to fill it.
+
+The owner prepares fresh separate bounded ext4 work and output filesystems, private
+UID10001 directories and a root-custodied read-only control/source projection.
+The runner checks dedicated mount points, filesystem capacities, distinct storage
+devices, empty work/output, canonical nonoverlapping mount paths and read-only
+source/control mount flags before `docker create`. It never requests an agent Docker
+socket, root/NOPASSWD, host service, ptrace/strace/eBPF, extra capabilities, unconfined
+seccomp, LD_PRELOAD, suppression or runtime mutation. Only the owner runs Docker.
+
+Fixture ceilings are CPU2, RAM2GiB with memory-swap equal to memory (no swap), pids128,
+15-minute outer deadline, 30 seconds per simple fixture invocation, work2GiB,
+output1GiB, 64MiB per stdout/stderr stream, 128MiB aggregate stream bytes, 1MiB per
+response and 16MiB response bytes per invocation, 10,000 arguments and 1MiB argv.
+These are fixture ceilings, **not a Node budget**. Filesystem capacity is an enforced
+storage ceiling, not a free-space estimate. Owner setup must account for filesystem
+metadata and reserved space. Lower recorder limits are allowed; raising a ceiling or
+using a nonfixture purpose fails validation. Docker daemon logging is disabled; raw
+child stdout/stderr are retained separately by the recorder. Docker attach metadata
+has a separate 1MiB bound per stream. Core dumps are disabled.
+
+### Manifest and explicit owner sequence
+
+1. Obtain independent source review. Record the full approved image mapping and
+   reviewed recorder source SHA-256. Do not pull an image or rebuild a failed layer.
+2. In fresh control storage copy the reviewed Python bytes as `recorder.py`. Prepare
+   the exact manifest and wrappers before projecting the directory read-only. Keep
+   these owner inputs credential-free. Never reuse R1/R2 logs or previous output.
+3. Run `bash agents/scripts/capture-approval-failure.sh plan /absolute/host.json`.
+   PLAN_ONLY validates the schema and prints fixed create argv and exact wrapper
+   bytes, without Docker or workload execution. It does not verify live image,
+   mounted storage or tooling. Use exactly those wrapper bytes for `cc`, `cxx` and
+   `link` (owner-created executable artifacts, not repository mode changes).
+4. Independently check source, immutable inputs, bounded mounts and manifest. The
+   container manifest must equal `host.recorder` with `fixtureArgvBase64` added.
+   Validate all selected real binaries against the admitted image; canonical tool
+   paths must name the real regular executable, not `/usr/bin/cc` symlink aliases.
+5. Owner runs `bash agents/scripts/capture-approval-failure.sh run /absolute/host.json
+   /absolute/output`. Only `purpose: owner-synthetic-fixture` is accepted in this
+   source slice. Run direct-vs-recorded synthetic fixtures first; this does not
+   authorize Node/V8 configure/compile/link or any phase-B workload.
+6. Inspect retained container/work/output, independently review records and replay
+   the synthetic vector. After the exact container has stopped, the owner seals
+   storage read-only and records external digests/custody. Do not remove/prune the
+   container or mutate original evidence. Only then seek separate next-profile
+   approval. No automatic full rebuild follows a fixture success.
+
+Host manifest schema (`buzz.approval-capture/v1`) requires:
+
+- `purpose: owner-synthetic-fixture`, `image: repository@sha256:<64 lowercase hex>`,
+  `platform: linux/amd64`, `imageId: sha256:<full config digest>`;
+- absolute ordinary single-link JSON paths `repositoryManifest`, `platformManifest`,
+  `configImage`, whose raw bytes hash to their descriptors. An OCI index must have
+  exactly one matching linux/amd64 descriptor (no variant); a direct repository
+  manifest must be byte-identical to the platform manifest. The platform config
+  descriptor size/digest and config os/architecture must match the full local image
+  ID; local image `RepoDigests` must include the exact repository reference. Image
+  environment accepts only PATH/LANG/LC_ALL/TZ/SOURCE_DATE_EPOCH keys; loader,
+  Python, compiler and other image environment settings fail before create;
+- absolute, canonical `source`, `control`, `work`, `output` roots without whitespace,
+  colon, comma or backslash mount syntax; `recorderSha256` of reviewed Python bytes;
+- `resources` keys exactly `cpus,memory,pids,seconds,work,output,stream,text`, with
+  the numeric byte/second values described above; no implicit defaults;
+- `fixtureArgvBase64`: canonical base64 of each argument *after* workload argv0,
+  including empty strings and non-UTF8 bytes. No NUL is representable in POSIX argv;
+- `recorder`: same schema/purpose, `work: /work`, `output: /output`, exact roles
+  `cc,cxx,link,workload`. Each role has `path` (canonical `/usr/` real binary) and
+  `sha256`. The workload role is the owner-reviewed synthetic tool, never a
+  request-selected tool, shell program, tracer, Node build or fallback;
+- `recorder.limits`: keys exactly `args:10000, argvBytes:1048576,
+  responseFile:1048576, responseTotal:16777216, stream:67108864, text:134217728,
+  seconds:30, records:20000` or lower positive integers;
+- `recorder.environment`: exactly PATH `/usr/bin:/bin`, LANG and LC_ALL `C`, TZ `UTC`,
+  SOURCE_DATE_EPOCH `0`, CC `/control/cc`, CXX `/control/cxx`, LINK `/control/link`.
+  No arbitrary inherited variables enter the child. Credentials are never permitted
+  in the manifest, argv, environment or response fixtures.
+
+There is deliberately no runnable image/hash example that could be mistaken for
+approval. The Node regression fixture constructs clearly synthetic mappings.
+
+### Recorder schema and fidelity boundary
+
+Every invocation creates an exclusive random record directory and fsynced
+`start.json` **before** spawning. It records role, received and forwarded argv
+including argv0 as separate base64 arrays, canonical cwd bytes, fixed effective
+environment, tool path/hash/stat identity, manifest identity and monotonic start.
+Wrapper argv0 is `/control/<role>`; forwarded argv0 is the pinned real tool path.
+All following bytes/order/empty arguments are preserved. The wrapper/process-group
+and stdin `/dev/null` topology, CC/CXX/LINK paths, PID, signal routing and timing are
+NEW instrumentation deltas. This is a supervised subprocess, not an `exec` claimed
+to return for its own completion. Python uses `shell=False` and a fixed executable;
+no flags, `-B`, specs, plugin or tracer selection are injected. Received compiler
+selection controls are rejected conservatively. No V=1 text is parsed or replayed.
+
+Top-level `@response` arguments are forwarded unchanged. Before execution, exact raw
+response bytes are retained as `response-NNNNNN.bin`, with ordered metadata in
+`responses.json` containing position, cwd/canonical path base64, stat identity,
+size and SHA-256. Responses must be canonical single-link ordinary files under
+work, read with O_NOFOLLOW from one fd with before/fd/after identity guards. Aliases,
+symlinks, hardlinks, missing/oversize files and nested/ambiguous `@` bytes are rejected.
+Embedded `-Wl,@...` transport is rejected rather than guessed. Response text is never
+split, normalized, expanded or used to construct compiler argv. Post-execution
+checks reject changed manifest, response or tool identity/hash. Supplied evidence
+has single-link policy; installed immutable tool files may legitimately be multiply
+linked. Fresh output artifacts have exclusive creation semantics.
+
+`stdout.bin` and `stderr.bin` retain separate bytes with counts/SHA-256 in atomic
+fsynced `completion.json`. A complete capture of a failing tool is CAPTURE_COMPLETE with the nonzero workload exit preserved through the owner runner; this is not a build PASS. Nonzero tool exits remain the same nonzero exit; tool
+signals and cancellation are propagated and recorded. Deadline, quota/ENOSPC,
+logger failure, stream/response overflow, mutation, missing completion or resource
+termination remain CAPTURE_INCOMPLETE/BLOCKED. Catchable cancellation attempts a
+completion before propagating the signal. SIGKILL, OOM, power loss and disk failure
+can prevent completion: start-only evidence is never PASS. An incomplete invocation
+may retain a prefix of stream bytes; it is not a complete transcript.
+
+A top g++ recorder observes the driver argv only. Its internal collect2/ld kernel
+exec argv is **UNOBSERVED**. Tool-internal helpers, generated input closure and
+Node/V8 behavior are not proven by this synthetic capture. Do not call the driver
+argv an ld argv, reconstruct an execution vector from verbose output, invent object
+inputs or substitute this record for an original R2 reproduction. Any gate requiring
+internal linker argv stops at UNOBSERVED and needs a separately reviewed mechanism.
+
+The host keeps create/attach/wait/inspect results and inventories in persistent
+output, checks the created container's image/UID/network/mounts/security/resources
+before starting, and stops the exact named container on attach/inspection failure.
+Caught host TERM/INT/HUP interrupts attach, then attempts stop/inspect/collection. Host SIGKILL or machine loss cannot run cleanup; the owner must maintain an independent deadline watchdog and reconcile the retained exact container name before any retry. A unique container name is recorded before create; there is no `--rm`, pull,
+auto-prune or cleanup verb. `seal.json` is an evidence summary and digest inventory,
+not a cryptographic attestation against the workload UID. Owner custody and
+read-only external sealing are still mandatory. Failed logger writes can prevent a
+seal; preserve storage and treat absent/partial metadata as incomplete, never retry
+into the same directories. Daemon/control/inspect failure does not erase prior data.
+
+### Verification and remaining gates
+
+`node --test agents/scripts/approval-capture.test.mjs` contains dry host validation,
+OCI mappings, explicit bounded Docker/storage facades, failure collection and a real
+Python synthetic fake-tool behavioral fixture. The latter exercises byte argv,
+direct-vs-recorded stdout/stderr, response identity/bytes/order/mutation, denied
+controls, nonzero/signal/cancel/deadline/overflow, parallel IDs and logger failure.
+Missing `/usr/bin/python3` is a mandatory failure, not a skip or static-test PASS.
+Use `bash -n`, embedded-JS syntax checks and Python `compile(..., 'exec')` without
+writing bytecode. Full feasible repository tests remain required. Developer source
+checks cannot certify Docker/native behavior. A fresh exact-SHA Reviewer, owner
+fixture including failure retention, OCI mapping, direct replay and independent
+external sealing are mandatory before Ready. No native/G0–G4 or profile approval
+is implied by publication of the Draft PR.
