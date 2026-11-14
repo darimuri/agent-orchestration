@@ -59,6 +59,24 @@ function validate(m){
   need(m.recorder.limits.stream<=m.resources.stream&&m.recorder.limits.text<=m.resources.text,'stream resource mapping');
   return m;
 }
+// Metadata exception is bound to the original immutable tuple, never to a key alone.
+const originalBuilder={manifest:'sha256:b2ed7cea3b936b4054afd8157944dffc0110ae61988b3644716ddaef5214ed31',imageId:'sha256:4088bab6dd858541a6ef1702ef856faf485a8052f06cc997003f14383fd1aa06',platform:'linux/amd64',environment:['PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin','DEBIAN_FRONTEND=noninteractive']};
+function imageEnvironment(m,platformDigest,config,image){
+  const raw=config.config?.Env,inspected=image.Config?.Env;
+  need(Array.isArray(raw)&&Array.isArray(inspected)&&raw.length===inspected.length&&raw.every((entry,i)=>typeof entry==='string'&&entry===inspected[i]),'raw/inspect ordered image environment mismatch');
+  const keys=new Set();
+  for(const entry of raw){
+    need(/^[A-Za-z_][A-Za-z0-9_]*=[^\x00\r\n]*$/.test(entry),'malformed image environment');
+    const key=entry.slice(0,entry.indexOf('='));need(!keys.has(key),'duplicate image environment');keys.add(key);
+  }
+  const exact=m.image.split('@')[1]===originalBuilder.manifest&&platformDigest===originalBuilder.manifest&&m.imageId===originalBuilder.imageId&&image.Id===originalBuilder.imageId&&m.platform===originalBuilder.platform&&config.os==='linux'&&config.architecture==='amd64'&&image.Os==='linux'&&image.Architecture==='amd64';
+  if(exact)need(JSON.stringify(raw)===JSON.stringify(originalBuilder.environment),'original builder environment differs');
+  else for(const key of keys)need(['PATH','LANG','LC_ALL','TZ','SOURCE_DATE_EPOCH'].includes(key),'unsafe image environment');
+}
+function recorderCommand(m){
+  // No image Env, host Env, shell or PATH-selected launcher reaches Python.
+  return ['-i',...Object.entries(m.recorder.environment).map(([k,v])=>k+'='+v),'/usr/bin/python3','-I','-B','-S','/control/recorder.py','fixture','/control/manifest.json'];
+}
 function mapping(m,repoBytes,platformBytes,configBytes,image){
   need('sha256:'+digest(repoBytes)===m.image.split('@')[1],'repository digest mapping');
   const root=JSON.parse(repoBytes),platform=JSON.parse(platformBytes),config=JSON.parse(configBytes);
@@ -69,12 +87,13 @@ function mapping(m,repoBytes,platformBytes,configBytes,image){
   need(platform.schemaVersion===2&&platform.config?.digest===m.imageId&&platform.config.size===configBytes.length,'OCI config descriptor');
   need('sha256:'+digest(configBytes)===m.imageId&&config.os==='linux'&&config.architecture==='amd64','config identity/platform');
   need(image.Id===m.imageId&&image.Os==='linux'&&image.Architecture==='amd64'&&image.RepoDigests?.includes(m.image),'local image mapping');
-  for(const entry of image.Config?.Env??[]){const i=entry.indexOf('=');need(i>0&&['PATH','LANG','LC_ALL','TZ','SOURCE_DATE_EPOCH'].includes(entry.slice(0,i)),'unsafe image environment');}
+  imageEnvironment(m,'sha256:'+digest(platformBytes),config,image);
   return {repository:m.image,platformDigest:'sha256:'+digest(platformBytes),configImageId:m.imageId,platform:m.platform};
 }
-function createArgs(m,name){return ['create','--name',name,'--platform',m.platform,'--pull','never','--network','none','--read-only','--user','10001:10001','--cap-drop','ALL','--security-opt','no-new-privileges:true','--cpus',String(m.resources.cpus),'--memory',String(m.resources.memory),'--memory-swap',String(m.resources.memory),'--pids-limit',String(m.resources.pids),'--log-driver','none','--ulimit','core=0:0','--workdir','/work',...[[m.source,'/source',true],[m.control,'/control',true],[m.work,'/work',false],[m.output,'/output',false]].flatMap(([s,d,ro])=>['--mount',`type=bind,src=${s},dst=${d}${ro?',readonly':''}`]),'--entrypoint','/usr/bin/python3',m.imageId,'-I','-B','-S','/control/recorder.py','fixture','/control/manifest.json'];}
+function createArgs(m,name){return ['create','--name',name,'--platform',m.platform,'--pull','never','--network','none','--read-only','--user','10001:10001','--cap-drop','ALL','--security-opt','no-new-privileges:true','--cpus',String(m.resources.cpus),'--memory',String(m.resources.memory),'--memory-swap',String(m.resources.memory),'--pids-limit',String(m.resources.pids),'--log-driver','none','--ulimit','core=0:0','--workdir','/work',...[[m.source,'/source',true],[m.control,'/control',true],[m.work,'/work',false],[m.output,'/output',false]].flatMap(([s,d,ro])=>['--mount',`type=bind,src=${s},dst=${d}${ro?',readonly':''}`]),'--entrypoint','/usr/bin/env',m.imageId,...recorderCommand(m)];}
 function containerIdentity(m,c){
   const h=c.HostConfig;need(c.Image===m.imageId&&c.Config.User==='10001:10001','container image/UID');
+  need(JSON.stringify(c.Config.Entrypoint)===JSON.stringify(['/usr/bin/env'])&&JSON.stringify(c.Config.Cmd)===JSON.stringify(recorderCommand(m)),'container fixed clean-environment invocation');
   need(h.NetworkMode==='none'&&h.ReadonlyRootfs&&h.Memory===m.resources.memory&&h.MemorySwap===m.resources.memory&&h.NanoCpus===m.resources.cpus*1e9&&h.PidsLimit===m.resources.pids,'container resources');
   need(h.CapDrop?.length===1&&h.CapDrop[0].toUpperCase()==='ALL'&&!h.CapAdd?.length&&!h.Privileged&&!h.AutoRemove,'container capabilities/lifetime');
   need(h.SecurityOpt?.length===1&&h.SecurityOpt[0]==='no-new-privileges:true'&&h.LogConfig?.Type==='none','container security/log caps');

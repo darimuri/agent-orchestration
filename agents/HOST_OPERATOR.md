@@ -2281,7 +2281,8 @@ The new ordinary `100644` sources are `scripts/capture-approval-failure.sh`,
 `scripts/approval-capture-recorder.py`, and `scripts/approval-capture.test.mjs`.
 Run the shell source through bash; do not chmod the checked-in sources. The owner
 runner requires `/usr/bin/node` and `/usr/bin/docker` at those fixed paths. The
-container requires `/usr/bin/python3`; Python is launched with `-I -B -S` to isolate
+container requires fixed `/usr/bin/env` and `/usr/bin/python3`; the former clears
+the environment with `-i` before Python is launched with `-I -B -S` to isolate
 startup paths, environment and site hooks. Missing prerequisites fail closed; there
 is no tool/PATH fallback or installation/acquisition step.
 
@@ -2352,8 +2353,11 @@ Host manifest schema (`buzz.approval-capture/v1`) requires:
   manifest must be byte-identical to the platform manifest. The platform config
   descriptor size/digest and config os/architecture must match the full local image
   ID; local image `RepoDigests` must include the exact repository reference. Image
-  environment accepts only PATH/LANG/LC_ALL/TZ/SOURCE_DATE_EPOCH keys; loader,
-  Python, compiler and other image environment settings fail before create;
+  raw OCI config `config.Env` and Docker image-inspect `Config.Env` must both be
+  arrays and agree exactly in order and bytes. Generic image metadata accepts only
+  PATH/LANG/LC_ALL/TZ/SOURCE_DATE_EPOCH keys with no duplicate or malformed entry.
+  The exact original tuple has the narrow two-entry exception documented below;
+  loader, Python, compiler and other image environment settings still fail before create;
 - absolute, canonical `source`, `control`, `work`, `output` roots without whitespace,
   colon, comma or backslash mount syntax; `recorderSha256` of reviewed Python bytes;
 - `resources` keys exactly `cpus,memory,pids,seconds,work,output,stream,text`, with
@@ -2473,3 +2477,56 @@ paths, plus partial writes, unread/closed caller pipes and read/logger failure.
 Python/Docker absence remains a mandatory owner-fixture blocker; source/facade
 results do not prove real relay behavior or Node/V8/internal linker fidelity. A new
 Draft PR and fresh exact-SHA independent review are required; PR #68 stays untouched.
+
+### R3 original-builder image metadata boundary (AGE #22)
+
+The image metadata exception is limited to this complete immutable tuple:
+
+- repository AND platform manifest digest:
+  `sha256:b2ed7cea3b936b4054afd8157944dffc0110ae61988b3644716ddaef5214ed31`
+- config/full local image ID:
+  `sha256:4088bab6dd858541a6ef1702ef856faf485a8052f06cc997003f14383fd1aa06`
+- platform: `linux/amd64` (raw config and inspect both linux/amd64).
+
+After all existing raw repository/platform/config hashes, descriptor sizes,
+RepoDigests and local image-ID checks, raw `config.Env` and inspect `Config.Env`
+must be present arrays and match exactly as ordered strings. There is no sorting,
+trimming, normalization or case folding. Duplicate keys, malformed entries and
+non-string values fail closed. For the exact tuple, the only accepted array is:
+
+```json
+[
+  "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+  "DEBIAN_FRONTEND=noninteractive"
+]
+```
+
+A missing/reordered/extra entry or another PATH/key/value/casing is rejected, even
+if raw and inspect match each other. Other tuples retain the prior generic key
+restriction; `DEBIAN_FRONTEND` is not added to that allowlist. Loader, Python,
+compiler, sanitizer, credential and other unknown variables remain rejected.
+This exception does not alter, derive, pull or install an image.
+
+These two values are admitted image metadata only. Generated Docker arguments use
+a fixed absolute `/usr/bin/env` entrypoint with `-i`, followed solely by the already
+validated manifest-controlled fixed environment, then absolute `/usr/bin/python3`
+and its unchanged isolated recorder arguments. Neither image PATH nor
+DEBIAN_FRONTEND is copied into those arguments or the recorder manifest. The
+pre-start and final container readbacks require this exact entrypoint and command;
+a direct Python entrypoint, missing `-i` or inserted metadata assignment rejects.
+Docker may retain the image metadata in container configuration, but `env -i`
+clears it before executing the recorder. The unchanged Python recorder continues
+to pass only its existing FIXED_ENV to every workload/tool. No caller-supplied
+launcher, PATH lookup, shell expansion, fallback or new environment key is added.
+
+R3 tests separate exact-tuple policy fixtures (the identity labels provided in the
+assignment) from full hash-valid synthetic OCI mappings. Original owner raw OCI
+bytes are not available in the Developer container; the policy fixture is not a
+claim that synthetic JSON hashes to the real builder. Tests cover exact ordered
+metadata, every tuple mismatch, missing/reordered/duplicate/malformed/additional
+entries, raw/inspect disagreement, representative execution/credential keys and
+generated-invocation/manifest/FIXED_ENV non-forwarding. recorder.py is unchanged.
+These are source and synthetic checks only. They do not establish owner-host
+fixture acceptance for the corrected SHA, Docker/native fidelity or qualification
+PASS. Publish a new Draft and obtain fresh exact-SHA review and owner evidence;
+PR #69 is unchanged and remains Draft.

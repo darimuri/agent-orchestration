@@ -12,7 +12,7 @@ const script=fileURLToPath(new URL('./capture-approval-failure.sh',import.meta.u
 const recorder=fileURLToPath(new URL('./approval-capture-recorder.py',import.meta.url));
 const sh=fs.readFileSync(script,'utf8');
 const js=sh.slice(sh.indexOf("const schema="),sh.indexOf('\ntry{\n  need(['));
-function helpers(extra={}){return vm.runInNewContext(js+'\n({validate,mapping,createArgs,containerIdentity,completion,inventory,ordinary,wrapper,run,storage,docker})',{
+function helpers(extra={}){return vm.runInNewContext(js+'\n({validate,mapping,imageEnvironment,recorderCommand,createArgs,containerIdentity,completion,inventory,ordinary,wrapper,run,storage,docker})',{
   fs,path,crypto,Buffer,setTimeout,clearTimeout,process:{argv:[]},...extra}, {timeout:1000});}
 const digest=b=>crypto.createHash('sha256').update(b).digest('hex');
 function fixture(){
@@ -35,12 +35,12 @@ for(const [label,change] of [
   ['env injection',m=>m.recorder.environment.LD_PRELOAD='/evil'],['response ceiling',m=>m.recorder.limits.responseFile=1048577],
   ['unbounded recorder',m=>m.recorder.limits.seconds=31],['malformed argv',m=>m.fixtureArgvBase64=['!!!!']],['NUL argv',m=>m.fixtureArgvBase64=['AA==']],
 ])test('plan rejects '+label,()=>{const m=fixture();change(m);assert.throws(()=>helpers().validate(m));});
-function mapped(){
-  const m=fixture(),config=Buffer.from(JSON.stringify({os:'linux',architecture:'amd64'}));m.imageId='sha256:'+digest(config);
+function mapped(rawEnv=['PATH=/usr/bin:/bin'],inspectEnv=rawEnv){
+  const m=fixture(),config=Buffer.from(JSON.stringify({os:'linux',architecture:'amd64',config:{Env:rawEnv}}));m.imageId='sha256:'+digest(config);
   const platform=Buffer.from(JSON.stringify({schemaVersion:2,config:{digest:m.imageId,size:config.length},layers:[]}));
   const repo=Buffer.from(JSON.stringify({schemaVersion:2,manifests:[{platform:{os:'linux',architecture:'amd64'},digest:'sha256:'+digest(platform),size:platform.length}]}));
   m.image='example.invalid/builder@sha256:'+digest(repo);
-  const image={Id:m.imageId,Os:'linux',Architecture:'amd64',RepoDigests:[m.image],Config:{Env:['PATH=/usr/bin:/bin']}};
+  const image={Id:m.imageId,Os:'linux',Architecture:'amd64',RepoDigests:[m.image],Config:{Env:inspectEnv}};
   return {m,config,platform,repo,image};
 }
 test('OCI index→platform→config→local image mapping and direct manifest positive controls',()=>{
@@ -52,9 +52,92 @@ for(const [label,change]of [
   ['missing RepoDigests',f=>delete f.image.RepoDigests],['different local ID',f=>f.image.Id='sha256:'+'d'.repeat(64)],
   ['image environment injection',f=>f.image.Config.Env=['LD_PRELOAD=/evil']],['wrong architecture',f=>f.image.Architecture='arm64'],
 ])test('mapping fails closed on '+label,()=>{const f=mapped();change(f);assert.throws(()=>helpers().mapping(f.m,f.repo,f.platform,f.config,f.image));});
-function container(m){return {Image:m.imageId,Config:{User:'10001:10001'},HostConfig:{NetworkMode:'none',ReadonlyRootfs:true,Memory:m.resources.memory,MemorySwap:m.resources.memory,NanoCpus:2e9,PidsLimit:128,CapDrop:['ALL'],CapAdd:[],Privileged:false,AutoRemove:false,SecurityOpt:['no-new-privileges:true'],LogConfig:{Type:'none'},IpcMode:'private'},Mounts:[[m.source,'/source',false],[m.control,'/control',false],[m.work,'/work',true],[m.output,'/output',true]].map(([Source,Destination,RW])=>({Type:'bind',Source,Destination,RW}))};}
+
+// Policy fixture uses the owner's exact identity labels after mapping checks.
+// Owner raw OCI config/manifest bytes are not available in this container: this
+// is not a claim that synthetic JSON hashes to those real content identities.
+function originalImage(){
+  const m=fixture();const platformDigest='sha256:b2ed7cea3b936b4054afd8157944dffc0110ae61988b3644716ddaef5214ed31';
+  m.image='example.invalid/builder@'+platformDigest;m.imageId='sha256:4088bab6dd858541a6ef1702ef856faf485a8052f06cc997003f14383fd1aa06';
+  const entries=['PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin','DEBIAN_FRONTEND=noninteractive'];
+  return {m,platformDigest,config:{os:'linux',architecture:'amd64',config:{Env:[...entries]}},image:{Id:m.imageId,Os:'linux',Architecture:'amd64',Config:{Env:[...entries]}}};
+}
+const audit=f=>helpers().imageEnvironment(f.m,f.platformDigest,f.config,f.image);
+test('only the original manifest/platform/config-image tuple admits the exact ordered metadata',()=>{
+  const f=originalImage(),before=JSON.stringify(f);audit(f);assert.equal(JSON.stringify(f),before);
+  const g=mapped(['PATH=/usr/bin:/bin','LANG=C']);helpers().mapping(g.m,g.repo,g.platform,g.config,g.image);
+});
+for(const [label,mutate]of [
+  ['repository digest',f=>f.m.image='example.invalid/builder@sha256:'+'0'.repeat(64)],
+  ['platform manifest digest',f=>f.platformDigest='sha256:'+'0'.repeat(64)],
+  ['config image ID',f=>f.m.imageId='sha256:'+'0'.repeat(64)],
+  ['local inspect image ID',f=>f.image.Id='sha256:'+'0'.repeat(64)],
+  ['requested platform',f=>f.m.platform='linux/arm64'],
+  ['raw platform',f=>f.config.architecture='arm64'],
+  ['inspect platform',f=>f.image.Architecture='arm64'],
+])test('metadata exception rejects wrong '+label,()=>{const f=originalImage();mutate(f);assert.throws(()=>audit(f));});
+for(const [label,entries]of [
+  ['missing PATH',['DEBIAN_FRONTEND=noninteractive']],
+  ['missing DEBIAN_FRONTEND',['PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin']],
+  ['reordered entries',['DEBIAN_FRONTEND=noninteractive','PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin']],
+  ['different PATH',['PATH=/usr/bin:/bin','DEBIAN_FRONTEND=noninteractive']],
+  ['different value',['PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin','DEBIAN_FRONTEND=interactive']],
+  ['different casing',['PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin','debian_frontend=noninteractive']],
+  ['different value casing',['PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin','DEBIAN_FRONTEND=NONINTERACTIVE']],
+  ['normalization',['PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin','DEBIAN_FRONTEND=noninteractive ']],
+  ['duplicate PATH',['PATH=/usr/bin:/bin','PATH=/usr/bin:/bin']],
+  ['duplicate DEBIAN_FRONTEND',['DEBIAN_FRONTEND=noninteractive','DEBIAN_FRONTEND=noninteractive']],
+  ['missing equals',['PATH=/usr/bin:/bin','DEBIAN_FRONTEND']],
+  ['malformed key',['PATH=/usr/bin:/bin','=noninteractive']],
+  ['nonstring entry',['PATH=/usr/bin:/bin',7]],
+  ['NUL entry',['PATH=/usr/bin:/bin','DEBIAN_FRONTEND=noninteractive\0']],
+  ['newline entry',['PATH=/usr/bin:/bin','DEBIAN_FRONTEND=noninteractive\n']],
+  ['empty arrays',[]],
+])test('original builder metadata rejects '+label,()=>{const f=originalImage();f.config.config.Env=entries;f.image.Config.Env=[...entries];assert.throws(()=>audit(f));});
+for(const [label,mutate]of [
+  ['absent raw Env',f=>delete f.config.config.Env],['absent inspect Env',f=>delete f.image.Config.Env],
+  ['absent both Env',f=>{delete f.config.config.Env;delete f.image.Config.Env;}],
+  ['non-array raw Env',f=>f.config.config.Env='PATH=/usr/bin:/bin'],['non-array inspect Env',f=>f.image.Config.Env={}],
+  ['raw/inspect mismatch',f=>f.image.Config.Env[0]='PATH=/usr/bin:/bin'],
+  ['raw/inspect reordering',f=>f.image.Config.Env.reverse()],
+])test('raw-config/inspect agreement rejects '+label,()=>{const f=originalImage();mutate(f);assert.throws(()=>audit(f));});
+for(const key of ['LD_PRELOAD','PYTHONPATH','PYTHONHOME','CC','CFLAGS','ASAN_OPTIONS','AWS_ACCESS_KEY_ID','CREDENTIAL_HELPER','UNEXPECTED'])
+  test('both original and other images reject extra '+key,()=>{
+    const f=originalImage();f.config.config.Env.push(key+'=synthetic');f.image.Config.Env.push(key+'=synthetic');assert.throws(()=>audit(f));
+    const g=mapped(['PATH=/usr/bin:/bin',key+'=synthetic']);assert.throws(()=>helpers().mapping(g.m,g.repo,g.platform,g.config,g.image));
+  });
+test('full hash-valid synthetic mapping rejects reordering/duplicates and generic DEBIAN_FRONTEND',()=>{
+  for(const [raw,inspect]of [[['PATH=/usr/bin:/bin','LANG=C'],['LANG=C','PATH=/usr/bin:/bin']],[['PATH=/usr/bin:/bin','PATH=/usr/bin:/bin'],['PATH=/usr/bin:/bin','PATH=/usr/bin:/bin']],[['PATH=/usr/bin:/bin','DEBIAN_FRONTEND=noninteractive'],['PATH=/usr/bin:/bin','DEBIAN_FRONTEND=noninteractive']]]){
+    const f=mapped(raw,inspect);assert.throws(()=>helpers().mapping(f.m,f.repo,f.platform,f.config,f.image));
+  }
+});
+test('generated Docker/recorder invocation excludes image metadata and keeps the fixed Python environment',()=>{
+  const f=originalImage(),h=helpers(),before=JSON.stringify(f.m.recorder);audit(f);
+  const args=Array.from(h.createArgs(f.m,'fixture')),command=Array.from(h.recorderCommand(f.m));
+  assert.equal(args[args.indexOf('--entrypoint')+1],'/usr/bin/env');assert.equal(command[0],'-i');
+  const python=command.indexOf('/usr/bin/python3');assert.deepEqual(command.slice(1,python),Object.entries(f.m.recorder.environment).map(([k,v])=>k+'='+v));
+  assert(!args.some(v=>v.includes('DEBIAN_FRONTEND')));assert(!args.includes(f.config.config.Env[0]));assert.equal(JSON.stringify(f.m.recorder),before);
+  const py=fs.readFileSync(recorder,'utf8'),fixed=py.match(/FIXED_ENV = (\{[\s\S]*?\})/)[1];
+  const entries=[...fixed.matchAll(/'([A-Z_]+)':\s*'([^']*)'/g)].map(([,k,v])=>[k,v]);assert.deepEqual(Object.fromEntries(entries),f.m.recorder.environment);
+  assert(!Object.hasOwn(f.m.recorder.environment,'DEBIAN_FRONTEND'));assert(!fixed.includes('DEBIAN_FRONTEND'));
+  const bad=fixture();bad.recorder.environment.DEBIAN_FRONTEND='noninteractive';assert.throws(()=>h.validate(bad));
+});
+test('local env -i synthetic child receives only the fixed environment, not observed image metadata',()=>{
+  const f=originalImage(),command=Array.from(helpers().recorderCommand(f.m));
+  const prefix=command.slice(0,command.indexOf('/usr/bin/python3'));
+  const metadata=Object.fromEntries(f.config.config.Env.map(s=>{const i=s.indexOf('=');return [s.slice(0,i),s.slice(i+1)];}));
+  // Real local clean-environment launcher + available Node as an inert env probe.
+  // This executes neither Docker nor the owner/Python workload fixture.
+  const result=spawnSync('/usr/bin/env',[...prefix,process.execPath,'-e','process.stdout.write(JSON.stringify(process.env))'],{env:metadata,encoding:'utf8',timeout:5000,maxBuffer:16384});
+  assert.ifError(result.error);assert.equal(result.status,0,result.stderr);
+  const actual=JSON.parse(result.stdout);assert.deepEqual(actual,f.m.recorder.environment);assert(!Object.hasOwn(actual,'DEBIAN_FRONTEND'));
+});
+function container(m){return {Image:m.imageId,Config:{User:'10001:10001',Entrypoint:['/usr/bin/env'],Cmd:Array.from(helpers().recorderCommand(m))},HostConfig:{NetworkMode:'none',ReadonlyRootfs:true,Memory:m.resources.memory,MemorySwap:m.resources.memory,NanoCpus:2e9,PidsLimit:128,CapDrop:['ALL'],CapAdd:[],Privileged:false,AutoRemove:false,SecurityOpt:['no-new-privileges:true'],LogConfig:{Type:'none'},IpcMode:'private'},Mounts:[[m.source,'/source',false],[m.control,'/control',false],[m.work,'/work',true],[m.output,'/output',true]].map(([Source,Destination,RW])=>({Type:'bind',Source,Destination,RW}))};}
 test('inspect readback accepts exact security, mapping, resources and mounts',()=>{const m=fixture();helpers().containerIdentity(m,container(m));});
 for(const [label,change]of [
+  ['direct image-env entrypoint',c=>c.Config.Entrypoint=['/usr/bin/python3']],
+  ['missing clean-environment flag',c=>c.Config.Cmd.shift()],
+  ['forwarded metadata entry',c=>c.Config.Cmd.splice(1,0,'DEBIAN_FRONTEND=noninteractive')],
   ['image',c=>c.Image='other'],['UID',c=>c.Config.User='0'],['network',c=>c.HostConfig.NetworkMode='host'],['writable root',c=>c.HostConfig.ReadonlyRootfs=false],
   ['swap',c=>c.HostConfig.MemorySwap=-1],['CPU',c=>c.HostConfig.NanoCpus=3e9],['pids',c=>c.HostConfig.PidsLimit=0],['caps',c=>c.HostConfig.CapAdd=['SYS_PTRACE']],
   ['auto remove',c=>c.HostConfig.AutoRemove=true],['security',c=>c.HostConfig.SecurityOpt=['seccomp:unconfined']],['devices',c=>c.HostConfig.Devices=[{}]],
