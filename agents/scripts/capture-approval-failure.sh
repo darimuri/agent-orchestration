@@ -10,6 +10,7 @@ const [mode, manifestPath, output] = process.argv.slice(2);
 const schema='buzz.approval-capture/v1';
 const env={PATH:'/usr/bin:/bin',LANG:'C',LC_ALL:'C',TZ:'UTC',HOME:'/dev/null',DOCKER_CONFIG:null};
 let hostCancel=null;const activeDocker=new Set();
+let dockerCustody=null;
 const caps={cpus:2,memory:2147483648,pids:128,seconds:900,work:2147483648,output:1073741824,stream:67108864,text:134217728};
 function need(ok,message){if(!ok)throw Error(message);}
 const digest=b=>crypto.createHash('sha256').update(b).digest('hex');
@@ -41,6 +42,7 @@ function validate(m){
   need(m.resources.memory===2147483648&&m.resources.cpus===2&&m.resources.pids===128,'fixture resource identity');
   const roots=[m.source,m.control,m.work,m.output];
   need(roots.every(p=>typeof p==='string'&&path.isAbsolute(p)&&!/[\s,:\\]/.test(p)),'mount path syntax');
+  need(typeof m.dockerCustodyRoot==='string'&&path.isAbsolute(m.dockerCustodyRoot)&&m.dockerCustodyRoot!=='/'&&path.resolve(m.dockerCustodyRoot)===m.dockerCustodyRoot&&!/[\s,:\\]/.test(m.dockerCustodyRoot)&&m.control.startsWith(m.dockerCustodyRoot+'/'),'explicit Docker custody root/control path');
   for(const [i,a]of roots.entries())for(const [j,b]of roots.entries())if(i!==j)need(a!==b&&!a.startsWith(b+'/'),'overlapping mounts');
   need(m.recorder?.work==='/work'&&m.recorder?.output==='/output','recorder roots');
   need(m.recorder.schema===schema&&m.recorder.purpose===m.purpose,'recorder schema');
@@ -112,18 +114,41 @@ function storage(m){
   need(fs.statSync(m.work).dev!==fs.statSync(m.output).dev,'separate work/output devices');
   for(const p of [m.source,m.control])need(fs.realpathSync(p)===p&&rows.filter(r=>p===r.fields[4]||p.startsWith(r.fields[4]+'/')).sort((a,b)=>b.fields[4].length-a.fields[4].length)[0]?.fields[5].split(',').includes('ro'),'read-only source/control projection');
 }
-function dockerConfig(control){
-  const config=path.join(control,'docker-config');
-  const rows=fs.readFileSync('/proc/self/mountinfo','utf8').trim().split('\n').map(line=>line.split(' - ')[0].split(' '));
-  for(const p of [control,config]){
-    need(path.isAbsolute(p)&&path.resolve(p)===p&&fs.realpathSync(p)===p,'canonical Docker config custody');
-    const st=fs.lstatSync(p);
-    need(st.isDirectory()&&!st.isSymbolicLink()&&st.uid===0&&st.gid===0&&(st.mode&0o222)===0,'root read-only Docker config custody');
-    const mount=rows.filter(r=>p===r[4]||p.startsWith(r[4]==='/'?'/':r[4]+'/')).sort((a,b)=>b[4].length-a[4].length)[0];
-    need(mount?.[5].split(',').includes('ro'),'read-only Docker config projection');
+function dockerConfig(control,root=dockerCustody?.root){
+  // Supported trust domain: host root controls mounts and POSIX DAC; workload
+  // UID10001 (including its groups/ACL entries) has no host mount/DAC bypass.
+  // Protect directory ENTRIES from / downward, not just the two leaf inodes.
+  need(typeof root==='string'&&path.isAbsolute(root)&&root!=='/'&&path.resolve(root)===root&&!/[\s,:\\]/.test(root),'explicit canonical Docker custody root');
+  need(typeof control==='string'&&path.isAbsolute(control)&&path.resolve(control)===control&&control.startsWith(root+'/'),'control outside Docker custody root');
+  const config=path.join(control,'docker-config'),parts=config.split('/').slice(1);
+  need(parts.length<=128,'Docker custody depth');
+  const rows=fs.readFileSync('/proc/self/mountinfo','utf8').trim().split('\n').map(line=>{
+    const sides=line.split(' - '),f=sides[0].split(' '),type=sides[1]?.split(' ')[0];
+    need(sides.length===2&&f.length>=6&&/^\d+$/.test(f[0])&&/^\d+$/.test(f[1]),'malformed Docker custody mountinfo');
+    return {f,type};
+  });
+  const mounts=rows.filter(r=>r.f[4]===root);
+  need(mounts.length===1&&mounts[0].f[5].split(',').includes('ro'),'explicit read-only Docker custody mount');
+  // No intervening mount can redirect the admitted subtree, even another ro bind.
+  need(!rows.some(r=>r.f[4].startsWith(root+'/')&&(config===r.f[4]||config.startsWith(r.f[4]+'/'))),'nested Docker custody mount escape');
+  const chain=[];let p='/';
+  for(let i=0;i<=parts.length;i++){
+    if(i)p=path.join(p,parts[i-1]);
+    need(fs.realpathSync(p)===p,'canonical Docker custody component');
+    const st=fs.lstatSync(p,{bigint:true}),inside=p===root||p.startsWith(root+'/');
+    // POSIX access-ACL named user/group write is bounded by the group class
+    // mask (mode 0020). Denying group/other writes also denies those ACL paths.
+    need(st.isDirectory()&&!st.isSymbolicLink()&&st.uid===0n&&st.gid===0n&&(st.mode&(inside?0o222n:0o022n))===0n,'protected Docker custody component');
+    const covering=rows.filter(r=>p===r.f[4]||p.startsWith(r.f[4]==='/'?'/':r.f[4]+'/')).sort((a,b)=>b.f[4].length-a.f[4].length);
+    need(covering.length>0&&['ext4','xfs','tmpfs','overlay'].includes(covering[0].type),'unsupported Docker custody filesystem');
+    need(covering.filter(r=>r.f[4]===covering[0].f[4]).length===1,'ambiguous Docker custody mount');
+    if(inside)need(covering[0].f[0]===mounts[0].f[0]&&covering[0].f[5].split(',').includes('ro'),'Docker custody mount escape');
+    chain.push({path:p,identity:['dev','ino','mode','uid','gid'].map(k=>st[k].toString()),mount:covering[0]});
   }
   // Empty only: no config.json, auth, helpers, contexts, plugins or aliases.
   need(fs.readdirSync(config).length===0,'empty credential-free Docker config required');
+  if(dockerCustody)need(dockerCustody.root===root&&dockerCustody.control===control&&JSON.stringify(dockerCustody.chain)===JSON.stringify(chain),'Docker custody chain changed');
+  else dockerCustody={root,control,chain};
   return config;
 }
 async function docker(args,timeout=30000,bound=1048576,raw=false,totalBound=2*bound){
@@ -226,7 +251,7 @@ function completion(m,attach){
 async function run(m){
   const runDeadline=Date.now()+m.resources.seconds*1000;
   storage(m);need(output===m.output,'explicit output mismatch');
-  env.DOCKER_CONFIG=dockerConfig(m.control);
+  env.DOCKER_CONFIG=dockerConfig(m.control,m.dockerCustodyRoot);
   const control=JSON.parse(ordinary(path.join(m.control,'manifest.json'),1048576));need(JSON.stringify(control)===JSON.stringify({...m.recorder,fixtureArgvBase64:m.fixtureArgvBase64}),'control manifest mismatch');
   const recorder=ordinary(path.join(m.control,'recorder.py'),1048576);need(digest(recorder)===m.recorderSha256,'reviewed recorder digest');
   // Wrappers are owner-created before read-only projection, not trusted by name.

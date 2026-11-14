@@ -17,7 +17,7 @@ function helpers(extra={}){return vm.runInNewContext(js+'\n({env,dockerConfig,va
 const digest=b=>crypto.createHash('sha256').update(b).digest('hex');
 function fixture(){
   const roles=Object.fromEntries(['cc','cxx','link','workload'].map(r=>[r,{path:'/usr/bin/fake',sha256:'a'.repeat(64)}]));
-  return {schema:'buzz.approval-capture/v1',purpose:'owner-synthetic-fixture',image:'example.invalid/builder@sha256:'+'b'.repeat(64),platform:'linux/amd64',imageId:'sha256:'+'c'.repeat(64),source:'/host/source',control:'/host/control',work:'/host/work',output:'/host/output',resources:{cpus:2,memory:2147483648,pids:128,seconds:900,work:2147483648,output:1073741824,stream:67108864,text:134217728},fixtureArgvBase64:[],recorder:{schema:'buzz.approval-capture/v1',purpose:'owner-synthetic-fixture',roles,work:'/work',output:'/output',limits:{args:10000,argvBytes:1048576,responseFile:1048576,responseTotal:16777216,stream:67108864,text:134217728,seconds:30,records:20000},environment:{PATH:'/usr/bin:/bin',LANG:'C',LC_ALL:'C',TZ:'UTC',SOURCE_DATE_EPOCH:'0',CC:'/control/cc',CXX:'/control/cxx',LINK:'/control/link'}}};
+  return {schema:'buzz.approval-capture/v1',purpose:'owner-synthetic-fixture',image:'example.invalid/builder@sha256:'+'b'.repeat(64),platform:'linux/amd64',imageId:'sha256:'+'c'.repeat(64),dockerCustodyRoot:'/host',source:'/host/source',control:'/host/control',work:'/host/work',output:'/host/output',resources:{cpus:2,memory:2147483648,pids:128,seconds:900,work:2147483648,output:1073741824,stream:67108864,text:134217728},fixtureArgvBase64:[],recorder:{schema:'buzz.approval-capture/v1',purpose:'owner-synthetic-fixture',roles,work:'/work',output:'/output',limits:{args:10000,argvBytes:1048576,responseFile:1048576,responseTotal:16777216,stream:67108864,text:134217728,seconds:30,records:20000},environment:{PATH:'/usr/bin:/bin',LANG:'C',LC_ALL:'C',TZ:'UTC',SOURCE_DATE_EPOCH:'0',CC:'/control/cc',CXX:'/control/cxx',LINK:'/control/link'}}};
 }
 test('plan validates explicit fixture ceilings and fixed wrapper argv without Docker',()=>{
   const h=helpers(),m=fixture();h.validate(m);const a=Array.from(h.createArgs(m,'fixture'));
@@ -27,6 +27,7 @@ test('plan validates explicit fixture ceilings and fixed wrapper argv without Do
   assert.match(h.wrapper('cc'),/record \/control\/manifest.json cc \/control\/cc "\$@"/);
 });
 for(const [label,change] of [
+  ['missing custody root',m=>delete m.dockerCustodyRoot],['relative custody root',m=>m.dockerCustodyRoot='host'],['global custody root',m=>m.dockerCustodyRoot='/'],['custody root escape',m=>m.dockerCustodyRoot='/different'],['aliased custody root',m=>m.dockerCustodyRoot='/host/../host'],
   ['mutable image',m=>m.image='ubuntu:latest'],['wrong platform',m=>m.platform='linux/arm64'],['short image ID',m=>m.imageId='sha256:123'],
   ['CPU ceiling',m=>m.resources.cpus=3],['swap/resource injection',m=>m.resources.swap=1],['RAM ceiling',m=>m.resources.memory=8589934592],
   ['deadline',m=>m.resources.seconds=901],['storage',m=>m.resources.work=2147483649],['log cap',m=>m.resources.stream=67108865],
@@ -144,13 +145,76 @@ for(const [label,change]of [
   ['writable source',c=>c.Mounts[0].RW=true],['extra mount',c=>c.Mounts.push({})],['unbounded log',c=>c.HostConfig.LogConfig.Type='json-file'],
 ])test('container readback rejects '+label,()=>{const m=fixture(),c=container(m);change(c);assert.throws(()=>helpers().containerIdentity(m,c));});
 // Explicit custody metadata facade: no root, mounts or Docker are used by tests.
-function custodyFs(control,variant){
-  const config=path.join(control,'docker-config');
+function custodyFs(control,variant,root=path.dirname(control)){
+  const config=path.join(control,'docker-config'),ancestor=path.dirname(root);
   return {...fs,
-    readFileSync(p,...args){if(p==='/proc/self/mountinfo')return '1 0 1:1 / '+control+' '+(variant==='writable mount'?'rw':'ro')+' - ext4 fixture ro\n'+(variant==='nested writable mount'?'2 1 1:2 / '+config+' rw - ext4 fixture rw\n':'');return fs.readFileSync(p,...args);},
-    lstatSync(p,...args){const st=fs.lstatSync(p,...args);if(p===control||p===config){st.uid=variant==='wrong owner'?10001:0;st.gid=variant==='wrong group'?10001:0;st.mode=(st.mode&~0o777)|((variant==='writable directory'||(variant==='writable control'&&p===control))?0o755:0o555);}return st;}
+    readFileSync(p,...args){
+      if(p!=='/proc/self/mountinfo')return fs.readFileSync(p,...args);
+      if(variant==='malformed mountinfo')return 'bad mountinfo';
+      const base='1 0 1:1 / / rw - '+(variant==='non-POSIX filesystem'?'nfs4':'ext4')+' fixture rw\n';
+      const projection=variant==='missing root mount'?'':'2 1 1:2 / '+root+' '+(variant==='writable mount'?'rw':'ro')+' - ext4 fixture ro\n';
+      const nested=['nested writable mount','nested readonly mount'].includes(variant)?'3 2 1:3 / '+control+' '+(variant==='nested writable mount'?'rw':'ro')+' - ext4 fixture ro\n':'';
+      return base+projection+nested+(variant==='ambiguous mount'?projection:'');
+    },
+    lstatSync(p,...args){
+      const st=fs.lstatSync(p,...args),big=typeof st.mode==='bigint';
+      if(big)for(const k of ['uid','gid','mode'])st[k]=Number(st[k]);
+      if(p==='/'||p===config||config.startsWith(p+'/')){
+        const inside=p===root||p.startsWith(root+'/');st.uid=0;st.gid=0;st.mode=(st.mode&~0o777)|(inside?0o555:0o755);
+        if(p===control||p===config){if(variant==='wrong owner')st.uid=10001;if(variant==='wrong group')st.gid=10001;if(variant==='writable directory'||(variant==='writable control'&&p===control))st.mode|=0o200;}
+        if(p===ancestor){
+          if(variant==='untrusted ancestor')st.uid=10001;
+          if(variant==='writable ancestor')st.mode|=0o022;
+          if(variant==='group writable ancestor'||variant==='ACL write mask')st.mode|=0o020;
+          if(variant==='other writable ancestor')st.mode|=0o002;
+          if(variant==='wrong ancestor group')st.gid=10001;
+        }
+      }
+      if(big)for(const k of ['uid','gid','mode'])st[k]=BigInt(st[k]);
+      return st;
+    }
   };
 }
+// Scratch directory operations are real. Only mount/UID metadata and Docker
+// spawn are synthetic; no credential file or privileged operation is involved.
+function custodyScratch(t){
+  const dir=fs.mkdtempSync(path.join(os.tmpdir(),'capture-chain-'));
+  t.after(()=>fs.rmSync(dir,{recursive:true,force:true}));
+  const ancestor=path.join(dir,'replaceable'),root=path.join(ancestor,'trusted'),control=path.join(root,'control'),config=path.join(control,'docker-config');
+  fs.mkdirSync(config,{recursive:true});return {dir,ancestor,root,control,config};
+}
+test('Reviewer rename/substitution reproduction is rejected before final leaf read or spawn',async t=>{
+  const f=custodyScratch(t);let swapped=false,spawned=0;
+  const substitute=()=>{
+    fs.renameSync(f.ancestor,f.ancestor+'-old');fs.mkdirSync(f.config,{recursive:true});
+    fs.writeFileSync(path.join(f.config,'config.json'),'synthetic sentinel');swapped=true;
+  };
+  const facade=custodyFs(f.control,'untrusted ancestor',f.root);
+  facade.readdirSync=p=>{const result=fs.readdirSync(p);if(p===f.config)substitute();return result;};
+  const h=helpers({fs:facade,spawn(){spawned++;throw Error('must not spawn');}});
+  assert.throws(()=>h.dockerConfig(f.control,f.root),/protected Docker custody component/);
+  h.env.DOCKER_CONFIG=f.config;await assert.rejects(()=>h.docker(['image','inspect','fixture']));
+  assert.equal(spawned,0);assert.equal(swapped,false);
+  // Prove the intended concurrent-actor scratch rename/replacement is possible,
+  // rather than a broken attack hook accidentally making this test pass.
+  substitute();assert.equal(fs.readFileSync(path.join(f.config,'config.json'),'utf8'),'synthetic sentinel');
+});
+for(const change of ['config entry','ancestor replacement','ancestor permissions','mount change'])
+  test('custody revalidation blocks next Docker call after '+change,async t=>{
+    const f=custodyScratch(t);let calls=0,changed=false;
+    const facade=custodyFs(f.control,null,f.root),readMount=facade.readFileSync,stat=facade.lstatSync;
+    facade.readFileSync=(p,...args)=>changed&&change==='mount change'&&p==='/proc/self/mountinfo'?readMount(p,...args).replace('2 1 1:2','9 1 1:2'):readMount(p,...args);
+    facade.lstatSync=(p,...args)=>{const st=stat(p,...args);if(changed&&change==='ancestor permissions'&&p===f.ancestor)st.mode|=0o020n;return st;};
+    const spawn=()=>{calls++;const child=new EventEmitter();child.stdout=new EventEmitter();child.stderr=new EventEmitter();child.kill=()=>true;queueMicrotask(()=>child.emit('close',0,null));return child;};
+    const h=helpers({fs:facade,spawn});h.env.DOCKER_CONFIG=h.dockerConfig(f.control,f.root);
+    assert.equal((await h.docker(['image','inspect','fixture'])).code,0);assert.equal(calls,1);
+    if(change==='config entry')fs.writeFileSync(path.join(f.config,'config.json'),'synthetic sentinel');
+    if(change==='ancestor replacement'){fs.renameSync(f.ancestor,f.ancestor+'-old');fs.mkdirSync(f.config,{recursive:true});}
+    changed=true;
+    await assert.rejects(()=>h.docker(['image','inspect','fixture']),/Docker custody|credential-free/);
+    assert.equal(calls,1);
+  });
+
 test('Docker attach retains byte-safe relay output within existing stream/text caps',async()=>{
   let payload=Buffer.from([0,255,128,65]);
   const spawn=(bin,args,options)=>{
@@ -159,7 +223,7 @@ test('Docker attach retains byte-safe relay output within existing stream/text c
     queueMicrotask(()=>{child.stdout.emit('data',payload);child.stderr.emit('data',Buffer.from('err'));child.emit('close',0,null);});return child;
   };
   const dir=fs.mkdtempSync(path.join(os.tmpdir(),'capture-docker-'));try{
-  fs.mkdirSync(path.join(dir,'docker-config'));const h=helpers({spawn,fs:custodyFs(dir)});h.env.DOCKER_CONFIG=h.dockerConfig(dir);let r=await h.docker(['start','--attach','fixture'],1000,16,true,24);
+  const control=path.join(dir,'control');fs.mkdirSync(control);fs.mkdirSync(path.join(control,'docker-config'));const h=helpers({spawn,fs:custodyFs(control,null,dir)});h.env.DOCKER_CONFIG=h.dockerConfig(control,dir);let r=await h.docker(['start','--attach','fixture'],1000,16,true,24);
   assert.equal(r.error,null);assert.deepEqual(Buffer.from(r.stdoutBase64,'base64'),payload);assert.equal(Buffer.from(r.stderrBase64,'base64').toString(),'err');
   payload=Buffer.alloc(17);r=await h.docker(['start','--attach','fixture'],1000,16,true,24);assert.equal(r.error,'docker output bound');
   }finally{fs.rmSync(dir,{recursive:true,force:true});}
@@ -235,6 +299,7 @@ test('no-response and ordered duplicate references remain valid controls',t=>{
 async function controllerCompletion(t,mutate,options={}){
   const dir=fs.mkdtempSync(path.join(os.tmpdir(),'capture-complete-controller-'));t.after(()=>fs.rmSync(dir,{recursive:true,force:true}));
   const f=mapped(),m=f.m;for(const k of ['source','control','work','output']){m[k]=path.join(dir,k);fs.mkdirSync(m[k]);}
+  m.dockerCustodyRoot=dir;
   const config=path.join(m.control,'docker-config');fs.mkdirSync(config);
   if(options.custody==='missing')fs.rmdirSync(config);
   if(options.custody==='file'){fs.rmdirSync(config);fs.writeFileSync(config,'');}
@@ -248,6 +313,9 @@ async function controllerCompletion(t,mutate,options={}){
   for(const [k,raw]of Object.entries(streams)){fs.writeFileSync(path.join(stages.id,k+'.bin'),raw);stages.end.streams[k]={bytes:raw.length,sha256:digest(raw),relayedBytes:raw.length,relayedSha256:digest(raw)};}
   stages.flush();if(mutate)mutate(stages);
   const attached={...streams};if(options.attach)options.attach(attached);
+  if(options.custody==='missing root')delete m.dockerCustodyRoot;
+  if(options.custody==='root escape')m.dockerCustodyRoot=path.join(dir,'elsewhere');
+  if(options.custody==='ancestor symlink'){const target=dir+'-real';fs.renameSync(dir,target);fs.symlinkSync(target,dir);t.after(()=>{if(fs.existsSync(dir))fs.unlinkSync(dir);fs.rmSync(target,{recursive:true,force:true});});}
   if(options.custody==='relative')m.control=path.relative(process.cwd(),m.control);
   if(options.custody==='alias')m.control=m.control+'/../control';
   const calls=[],spawn=(bin,argv,opts)=>{
@@ -263,7 +331,7 @@ async function controllerCompletion(t,mutate,options={}){
   };
   // Only storage prerequisites and OS custody metadata are facades. Real run,
   // Docker transport, completion validation, raw persistence and seal execute.
-  const body=js.slice(0,js.indexOf('function storage(m){'))+'function storage(m){}\n'+js.slice(js.indexOf('function dockerConfig(control){'));
+  const body=js.slice(0,js.indexOf('function storage(m){'))+'function storage(m){}\n'+js.slice(js.indexOf('function dockerConfig(control,root='));
   const h=vm.runInNewContext(body+'\n({run})',{fs:custodyFs(m.control,options.custody),path,crypto,Buffer,output:m.output,spawn,setTimeout,clearTimeout},{timeout:1000});
   if(options.custody){await assert.rejects(()=>h.run(m));assert.equal(calls.length,0);assert(!fs.existsSync(path.join(m.output,'host-start.json')));return;}
   if(mutate||options.attach)await assert.rejects(()=>h.run(m),/CAPTURE_INCOMPLETE/);else assert.equal(await h.run(m),code);
@@ -283,7 +351,7 @@ for(const [label,attach]of [
   ['mutated stdout',s=>s.stdout=Buffer.from([0,255,129,65])],
   ['swapped streams',s=>[s.stdout,s.stderr]=[s.stderr,s.stdout]],
 ])test('whole controller retains raw attach and seals INCOMPLETE for '+label,t=>controllerCompletion(t,null,{code:7,attach}));
-for(const custody of ['missing','file','symlink','relative','alias','wrong owner','wrong group','writable directory','writable control','writable mount','nested writable mount','entry:config.json','entry:auths','entry:contexts','entry:credHelpers','entry:alias','entry:unexpected'])
+for(const custody of ['missing root','root escape','missing root mount','malformed mountinfo','ambiguous mount','non-POSIX filesystem','writable ancestor','untrusted ancestor','group writable ancestor','other writable ancestor','ACL write mask','wrong ancestor group','ancestor symlink','nested readonly mount','missing','file','symlink','relative','alias','wrong owner','wrong group','writable directory','writable control','writable mount','nested writable mount','entry:config.json','entry:auths','entry:contexts','entry:credHelpers','entry:alias','entry:unexpected'])
   test('whole controller rejects Docker config before Docker: '+custody,t=>controllerCompletion(t,null,{custody}));
 test('whole controller seals COMPLETE for a fully correlated invocation',t=>controllerCompletion(t));
 for(const [label,mutate]of corruptions.filter(([label])=>['missing start','missing spawn','missing completion','missing response metadata','missing response bytes','corrupt response bytes','contradictory exit0/signal9','wrong relay hash'].includes(label)))

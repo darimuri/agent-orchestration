@@ -2324,18 +2324,58 @@ conversion. Core dumps are disabled.
 2. In fresh control storage copy the reviewed Python bytes as `recorder.py`. Prepare
    the exact manifest and wrappers before projecting the directory read-only. Keep
    these owner inputs credential-free. Prepare an **empty** `docker-config`
-   directory directly under control; use root:root ownership and mode 0555 for
-   control and docker-config before the read-only projection. Do not copy or read
-   the owner's Docker config. No config.json (even empty), auths, credential helper,
-   context, plugin, alias or other entry is admitted. The derived host path is
-   always `<control>/docker-config`; no manifest override is accepted. Both
-   directories must be absolute/canonical real non-symlink directories, root:root,
-   without any write mode bits and covered by read-only mounts (including nested
-   mounts). Missing, writable, nonempty or unexpected custody fails before the
-   first Docker call. Every Docker call revalidates and uses only that explicit
-   DOCKER_CONFIG; HOME stays /dev/null and no owner environment is inherited.
-   This host CLI configuration does not alter recorder FIXED_ENV.
-   Never reuse R1/R2 logs or previous output.
+   directly under control. R5 also requires an explicit host-only
+   `dockerCustodyRoot`: an owner-prepared dedicated read-only mount containing
+   control, for example `/run/buzz-approval-capture` with
+   `control: /run/buzz-approval-capture/<fixture-id>/control`. Work/output stay
+   on their separate bounded mounts. This is a new custody construction; arbitrary
+   placement under a home directory or ordinary writable /tmp is not admitted.
+   The owner prepares and projects it before invoking the runner; the runner never
+   creates, chowns, chmods, mounts or repairs host custody paths.
+
+   The supported trust boundary is host root and its authenticated owner-operated
+   setup, in the same host mount/user namespace used by the Docker CLI. Root may
+   prepare/change mounts and ancestor permissions; it is trusted not to change the
+   chain during capture. The workload UID10001, all its groups and other untrusted
+   users must have no host mount authority, DAC bypass, or equivalent privilege.
+   Do not map an untrusted user namespace or privileged/FUSE filesystem into this
+   chain. Owner authentication alone does not make a writable pathname safe.
+
+   Owner validation must prove the **entire directory-entry chain**, starting at
+   /, including /run, the custody mountpoint, fixture directories, control and
+   docker-config. Every component must be a canonical real non-symlink directory,
+   root:root. Above the custody mount, root may write, but group/other write bits
+   must be clear (normally 0755). At and below it, all write bits must be clear
+   (normally 0555). Thus UID10001 cannot write a parent directory to rename or
+   replace its child's entry, even if a leaf alone was already read-only. A sticky
+   /tmp parent is insufficient and is rejected. This supported /run layout avoids
+   depending on an owner-home ancestor's ownership or permissions.
+
+   Only local POSIX-DAC ext4, xfs, tmpfs or overlay mounts on the chain are admitted.
+   For POSIX access ACLs, the group-class mode write bit is the effective mask for
+   named user/group entries; clearing it also denies their write grants. The owner
+   must verify actual ownership, access ACL masks and mount topology, including
+   backing aliases and absence of untrusted mount/namespace privilege. Non-POSIX
+   ACL semantics (for example NFSv4) are outside this policy and fail closed by
+   filesystem type. Do not claim native ACL/custody proof from synthetic tests.
+
+   The custody root must be an explicit exact read-only mountpoint, not merely a
+   directory beneath one. No nested mount may redirect any component through
+   docker-config, including another read-only bind; ambiguous/stacked mountpoints
+   and unsupported filesystem types fail closed. All components' device/inode,
+   owner/mode and effective mount identity are pinned on first validation and
+   rechecked before every Docker call. This detects next-call substitution, while
+   non-replaceable parents close the current-call rename window; retrying a leaf
+   realpath alone is not the protection.
+
+   No config.json (even empty), auths, credential helper, context, plugin, alias or
+   other entry is admitted. The derived host path remains
+   `<control>/docker-config`; no separate config-path override is accepted. Missing,
+   malformed, writable or unexpected custody fails before any Docker spawn. Every
+   call uses only that explicit DOCKER_CONFIG; HOME stays /dev/null and no owner
+   environment or credential-bearing descriptors are inherited. Recorder FIXED_ENV
+   is unchanged. Never reuse R1/R2 logs or previous output. PR71 and predecessor
+   evidence remain blocked/read-only pending corrected-SHA owner validation.
 3. Run `bash agents/scripts/capture-approval-failure.sh plan /absolute/host.json`.
    PLAN_ONLY validates the schema and prints fixed create argv and exact wrapper
    bytes, without Docker or workload execution. It does not verify live image,
@@ -2356,6 +2396,10 @@ conversion. Core dumps are disabled.
    approval. No automatic full rebuild follows a fixture success.
 
 Host manifest schema (`buzz.approval-capture/v1`) requires:
+
+- `dockerCustodyRoot`: explicit canonical absolute read-only custody mount root,
+  distinct from / and containing `control` as a strict descendant; full-chain
+  ownership/mode/mount validation is required in run mode, even if plan succeeds;
 
 - `purpose: owner-synthetic-fixture`, `image: repository@sha256:<64 lowercase hex>`,
   `platform: linux/amd64`, `imageId: sha256:<full config digest>`;
@@ -2466,7 +2510,8 @@ into the same directories. Daemon/control/inspect failure does not erase prior d
 ### Verification and remaining gates
 
 `node --test agents/scripts/approval-capture.test.mjs` contains dry host validation,
-OCI mappings, explicit bounded Docker/storage facades, failure collection and a real
+OCI mappings, explicit bounded Docker/storage facades, full-chain custody and real
+scratch rename/substitution rejection, next-call mutation, failure collection and a real
 Python synthetic fake-tool behavioral fixture. The latter exercises byte argv,
 direct-vs-recorded stdout/stderr, response identity/bytes/order/mutation, denied
 controls, nonzero/signal/cancel/deadline/overflow, parallel IDs and logger failure.
