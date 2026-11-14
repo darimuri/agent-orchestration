@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import vm from 'node:vm';
+import {EventEmitter} from 'node:events';
 import crypto from 'node:crypto';
 import {spawnSync} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
@@ -11,8 +12,8 @@ const script=fileURLToPath(new URL('./capture-approval-failure.sh',import.meta.u
 const recorder=fileURLToPath(new URL('./approval-capture-recorder.py',import.meta.url));
 const sh=fs.readFileSync(script,'utf8');
 const js=sh.slice(sh.indexOf("const schema="),sh.indexOf('\ntry{\n  need(['));
-function helpers(extra={}){return vm.runInNewContext(js+'\n({validate,mapping,createArgs,containerIdentity,completion,inventory,ordinary,wrapper,run,storage})',{
-  fs,path,crypto,Buffer,process:{argv:[]},...extra}, {timeout:1000});}
+function helpers(extra={}){return vm.runInNewContext(js+'\n({validate,mapping,createArgs,containerIdentity,completion,inventory,ordinary,wrapper,run,storage,docker})',{
+  fs,path,crypto,Buffer,setTimeout,clearTimeout,process:{argv:[]},...extra}, {timeout:1000});}
 const digest=b=>crypto.createHash('sha256').update(b).digest('hex');
 function fixture(){
   const roles=Object.fromEntries(['cc','cxx','link','workload'].map(r=>[r,{path:'/usr/bin/fake',sha256:'a'.repeat(64)}]));
@@ -59,6 +60,17 @@ for(const [label,change]of [
   ['auto remove',c=>c.HostConfig.AutoRemove=true],['security',c=>c.HostConfig.SecurityOpt=['seccomp:unconfined']],['devices',c=>c.HostConfig.Devices=[{}]],
   ['writable source',c=>c.Mounts[0].RW=true],['extra mount',c=>c.Mounts.push({})],['unbounded log',c=>c.HostConfig.LogConfig.Type='json-file'],
 ])test('container readback rejects '+label,()=>{const m=fixture(),c=container(m);change(c);assert.throws(()=>helpers().containerIdentity(m,c));});
+test('Docker attach retains byte-safe relay output within existing stream/text caps',async()=>{
+  let payload=Buffer.from([0,255,128,65]);
+  const spawn=(bin,args,options)=>{
+    assert.equal(bin,'/usr/bin/docker');assert.equal(options.env.HOME,'/dev/null');
+    const child=new EventEmitter();child.stdout=new EventEmitter();child.stderr=new EventEmitter();child.kill=()=>true;
+    queueMicrotask(()=>{child.stdout.emit('data',payload);child.stderr.emit('data',Buffer.from('err'));child.emit('close',0,null);});return child;
+  };
+  const h=helpers({spawn});let r=await h.docker(['start','--attach','fixture'],1000,16,true,24);
+  assert.equal(r.error,null);assert.deepEqual(Buffer.from(r.stdoutBase64,'base64'),payload);assert.equal(Buffer.from(r.stderrBase64,'base64').toString(),'err');
+  payload=Buffer.alloc(17);r=await h.docker(['start','--attach','fixture'],1000,16,true,24);assert.equal(r.error,'docker output bound');
+});
 test('host collection rejects missing completion, hardlinks, symlinks and mutation',t=>{
   const dir=fs.mkdtempSync(path.join(os.tmpdir(),'capture-host-'));t.after(()=>fs.rmSync(dir,{recursive:true,force:true}));
   const h=helpers(),p=path.join(dir,'f');fs.writeFileSync(p,'bytes');assert.equal(h.ordinary(p,100).toString(),'bytes');
@@ -68,17 +80,90 @@ test('host collection rejects missing completion, hardlinks, symlinks and mutati
   const facade={...fs,readSync(fd,...args){fs.writeFileSync(p,'changed');return fs.readSync(fd,...args);}};
   assert.throws(()=>helpers({fs:facade}).ordinary(p,100),/mutation/);
 });
-test('a completely captured nonzero exit remains nonzero, while missing/corrupt evidence is incomplete',t=>{
-  const dir=fs.mkdtempSync(path.join(os.tmpdir(),'capture-completion-'));t.after(()=>fs.rmSync(dir,{recursive:true,force:true}));
-  const m={...fixture(),output:dir},id=path.join(dir,'records','a'.repeat(32));fs.mkdirSync(id,{recursive:true});
-  fs.writeFileSync(path.join(id,'start.json'),JSON.stringify({schema:m.schema,role:'workload'}));
-  const end={schema:m.schema,status:'CAPTURE_COMPLETE',returncode:7,streams:{}};
-  for(const k of ['stdout','stderr']){const b=Buffer.from(k);fs.writeFileSync(path.join(id,k+'.bin'),b);end.streams[k]={bytes:b.length,sha256:digest(b)};}
-  const finish=()=>fs.writeFileSync(path.join(id,'completion.json'),JSON.stringify(end));finish();assert.equal(helpers().completion(m),7);
-  end.returncode=-15;finish();assert.equal(helpers().completion(m),143);
-  fs.writeFileSync(path.join(id,'stderr.bin'),'tampered');assert.throws(()=>helpers().completion(m),/seal mismatch/);
-  fs.unlinkSync(path.join(id,'completion.json'));assert.throws(()=>helpers().completion(m));
+function record(m,args=['@args.rsp'],code=0){
+  const id=path.join(m.output,'records','a'.repeat(32));fs.mkdirSync(id,{recursive:true});
+  m.fixtureArgvBase64=args.map(x=>Buffer.from(x).toString('base64'));
+  const control=Buffer.from(JSON.stringify({...m.recorder,fixtureArgvBase64:m.fixtureArgvBase64}));fs.mkdirSync(m.control,{recursive:true});fs.writeFileSync(path.join(m.control,'manifest.json'),control);
+  const enc=x=>Buffer.from(x).toString('base64'),identity=(n,links=1,mode=0o100644)=>[1,2,mode,links,n,1,1];
+  const start={schema:m.schema,status:'STARTED',role:'workload',recorderPid:11,startedMonotonicNs:10,cwdBase64:enc('/work'),receivedArgvBase64:[enc('/control/workload'),...m.fixtureArgvBase64],forwardedArgvBase64:[enc(m.recorder.roles.workload.path),...m.fixtureArgvBase64],environment:m.recorder.environment,tool:{...m.recorder.roles.workload,identity:identity(123,2,0o100755)},manifest:{pathBase64:enc('/control/manifest.json'),size:control.length,sha256:digest(control),identity:identity(control.length)},internalCollect2LdArgv:'UNOBSERVED',nodeFidelity:'NOT_PROVEN'};
+  const spawned={pid:12,processGroup:12},responses=[];
+  args.forEach((arg,position)=>{if(!arg.startsWith('@'))return;const bytes=Buffer.from('synthetic response bytes'),artifact='response-'+String(position).padStart(6,'0')+'.bin';fs.writeFileSync(path.join(id,artifact),bytes);responses.push({position,artifact,pathBase64:enc('/work/'+arg.slice(1)),cwdBase64:enc('/work'),size:bytes.length,sha256:digest(bytes),identity:identity(bytes.length)});});
+  const end={schema:m.schema,status:'CAPTURE_COMPLETE',returncode:code,signal:code<0?-code:null,cancelSignal:null,blocker:null,finishedMonotonicNs:20,internalCollect2LdArgv:'UNOBSERVED',streams:{}};
+  for(const k of ['stdout','stderr']){const raw=Buffer.from(k);fs.writeFileSync(path.join(id,k+'.bin'),raw);end.streams[k]={bytes:raw.length,sha256:digest(raw),relayedBytes:raw.length,relayedSha256:digest(raw)};}
+  const write=(name,value)=>fs.writeFileSync(path.join(id,name),JSON.stringify(value));
+  const flush=()=>{for(const [name,value]of [['start.json',start],['spawn.json',spawned],['responses.json',responses],['completion.json',end]])write(name,value);};flush();
+  return {id,start,spawned,responses,end,flush};
+}
+function recorded(t){const dir=fs.mkdtempSync(path.join(os.tmpdir(),'capture-record-'));t.after(()=>fs.rmSync(dir,{recursive:true,force:true}));const m=fixture();m.output=path.join(dir,'output');m.control=path.join(dir,'control');return {m,...record(m)};}
+test('complete stage/response/relay control preserves positive, nonzero and signal mappings',t=>{
+  const f=recorded(t),h=helpers();assert.equal(h.completion(f.m),0);
+  f.end.returncode=7;f.flush();assert.equal(h.completion(f.m),7);
+  f.end.returncode=-15;f.end.signal=15;f.flush();assert.equal(h.completion(f.m),143);
 });
+const corruptions=[
+  ['missing start',f=>fs.unlinkSync(path.join(f.id,'start.json'))],
+  ['missing spawn',f=>fs.unlinkSync(path.join(f.id,'spawn.json'))],
+  ['missing completion',f=>fs.unlinkSync(path.join(f.id,'completion.json'))],
+  ['missing response metadata',f=>fs.unlinkSync(path.join(f.id,'responses.json'))],
+  ['missing response bytes',f=>fs.unlinkSync(path.join(f.id,'response-000000.bin'))],
+  ['corrupt response bytes',f=>fs.writeFileSync(path.join(f.id,'response-000000.bin'),'corrupt')],
+  ['contradictory exit0/signal9',f=>{f.end.signal=9;f.flush();}],
+  ['negative exit without signal',f=>{f.end.returncode=-15;f.flush();}],
+  ['cancel despite complete',f=>{f.end.cancelSignal=15;f.flush();}],
+  ['bad spawn PID',f=>{f.spawned.pid=0;f.flush();}],
+  ['bad process group',f=>{f.spawned.processGroup=99;f.flush();}],
+  ['missing argv',f=>{delete f.start.receivedArgvBase64;f.flush();}],
+  ['forwarded argv differs',f=>{f.start.forwardedArgvBase64.pop();f.flush();}],
+  ['malformed base64',f=>{f.start.receivedArgvBase64[1]='!!!!';f.flush();}],
+  ['wrong argv0',f=>{f.start.forwardedArgvBase64[0]=Buffer.from('/evil').toString('base64');f.flush();}],
+  ['role mismatch',f=>{f.start.role='evil';f.flush();}],
+  ['unpinned tool',f=>{f.start.tool.sha256='b'.repeat(64);f.flush();}],
+  ['wrong environment',f=>{f.start.environment={LD_PRELOAD:'/evil'};f.flush();}],
+  ['bad manifest hash',f=>{f.start.manifest.sha256='0'.repeat(64);f.flush();}],
+  ['response row absent',f=>{f.responses.length=0;f.flush();}],
+  ['response position',f=>{f.responses[0].position=1;f.flush();}],
+  ['response artifact alias',f=>{f.responses[0].artifact='../else';f.flush();}],
+  ['response cwd mismatch',f=>{f.responses[0].cwdBase64=Buffer.from('/work/other').toString('base64');f.flush();}],
+  ['response path mismatch',f=>{f.responses[0].pathBase64=Buffer.from('/work/other').toString('base64');f.flush();}],
+  ['response identity absent',f=>{delete f.responses[0].identity;f.flush();}],
+  ['response hardlink identity',f=>{f.responses[0].identity[3]=2;f.flush();}],
+  ['response size contradiction',f=>{f.responses[0].size++;f.flush();}],
+  ['response hash contradiction',f=>{f.responses[0].sha256='0'.repeat(64);f.flush();}],
+  ['corrupt JSON',f=>fs.writeFileSync(path.join(f.id,'spawn.json'),'{')],
+  ['wrong relay count',f=>{f.end.streams.stdout.relayedBytes=0;f.flush();}],
+  ['wrong relay hash',f=>{f.end.streams.stderr.relayedSha256='0'.repeat(64);f.flush();}],
+  ['corrupt stream',f=>fs.writeFileSync(path.join(f.id,'stderr.bin'),'tampered')],
+];
+for(const [label,mutate]of corruptions)test('completion rejects '+label,t=>{const f=recorded(t);mutate(f);assert.throws(()=>helpers().completion(f.m));});
+test('no-response and ordered duplicate references remain valid controls',t=>{
+  for(const args of [[],['@args.rsp','@args.rsp']]){const f=recorded(t);fs.rmSync(f.m.output,{recursive:true});record(f.m,args);assert.equal(helpers().completion(f.m),0);}
+});
+
+async function controllerCompletion(t,mutate){
+  const dir=fs.mkdtempSync(path.join(os.tmpdir(),'capture-complete-controller-'));t.after(()=>fs.rmSync(dir,{recursive:true,force:true}));
+  const f=mapped(),m=f.m;for(const k of ['source','control','work','output']){m[k]=path.join(dir,k);fs.mkdirSync(m[k]);}
+  for(const [key,name,raw]of [['repositoryManifest','repo.json',f.repo],['platformManifest','platform.json',f.platform],['configImage','config.json',f.config]]){m[key]=path.join(dir,name);fs.writeFileSync(m[key],raw);}
+  fs.writeFileSync(path.join(m.control,'recorder.py'),'synthetic recorder bytes');m.recorderSha256=digest(Buffer.from('synthetic recorder bytes'));
+  for(const role of ['cc','cxx','link'])fs.writeFileSync(path.join(m.control,role),helpers().wrapper(role));
+  const stages={m,...record(m)};if(mutate)mutate(stages);
+  const calls=[],fakeDocker=async args=>{
+    calls.push(args);let stdout='';
+    if(args[0]==='image')stdout=JSON.stringify([f.image]);
+    if(args[0]==='inspect'){const c=container(m);c.State={Running:false,OOMKilled:false,Error:'',ExitCode:0};stdout=JSON.stringify([c]);}
+    if(args[0]==='wait')stdout='0\n';return {code:0,error:null,signal:null,stdout,stderr:''};
+  };
+  // These are the same explicit bounded Docker/storage facades used for the
+  // independent false-complete reproduction, not a native container fixture.
+  const body=js.slice(0,js.indexOf('function storage(m){'))+'function storage(m){}\n'+
+    'async function docker(args,timeout,bound){return fakeDocker(args,timeout,bound);}\n'+js.slice(js.indexOf('function ok(r)'));
+  const h=vm.runInNewContext(body+'\n({run})',{fs,path,crypto,Buffer,output:m.output,fakeDocker},{timeout:1000});
+  if(mutate)await assert.rejects(()=>h.run(m),/CAPTURE_INCOMPLETE/);else assert.equal(await h.run(m),0);
+  assert.equal(JSON.parse(fs.readFileSync(path.join(m.output,'seal.json'))).status,mutate?'CAPTURE_INCOMPLETE':'CAPTURE_COMPLETE');
+  assert.deepEqual(calls.map(x=>x[0]),['image','create','inspect','start','wait','inspect']);
+}
+test('whole controller seals COMPLETE for a fully correlated invocation',t=>controllerCompletion(t));
+for(const [label,mutate]of corruptions.filter(([label])=>['missing start','missing spawn','missing completion','missing response metadata','missing response bytes','corrupt response bytes','contradictory exit0/signal9','wrong relay hash'].includes(label)))
+  test('whole controller seals INCOMPLETE for '+label,t=>controllerCompletion(t,mutate));
 test('runner retains failure collection and does not provide cleanup/build/acquisition verbs',()=>{
   for(const word of ['host-start.json','prestart-inspect.json','final-inspect.json','recovery-stop.json','recovery-inspect.json','work-inventory.json','output-inventory.json','seal.json','CAPTURE_INCOMPLETE','UNOBSERVED'])assert(sh.includes(word),word);
   assert(!/\['(?:rm|prune|build|pull)'/.test(sh));assert.match(sh,/if\(created&&!final\)/);assert.match(sh,/finally\{/);
@@ -132,13 +217,35 @@ if a and a[0]=='mutate': open(a[1][1:],'wb').write(b'changed')
 os.write(1,json.dumps({'argv':[os.fsencode(x).hex() for x in a],'env':dict(os.environ)},sort_keys=True).encode())
 os.write(2,b'separate-stderr')
 ''');os.chmod(tool,0o700)
+    # Independent fake query/binary/dual-stream commands produce output BEFORE a
+    # nonzero exit or signal, so an empty caller stream cannot pass by accident.
+    original_tool=open(tool).read();prefix='''import threading
+def send(fd,data):
+    view=memoryview(data)
+    while view:
+        n=os.write(fd,view);view=view[n:]
+if a and a[0] in ['query','binary','burst','exit','signal']:
+    mode=a[0]
+    if mode=='query':send(1,b'x86_64-synthetic-query\\n');send(2,b'query-stderr\\n')
+    elif mode=='burst':
+        def flood(fd,byte):
+            for _ in range(128):send(fd,byte*32768)
+        threads=[threading.Thread(target=flood,args=(1,b'A')),threading.Thread(target=flood,args=(2,b'B'))]
+        for thread in threads:thread.start()
+        for thread in threads:thread.join()
+    else:send(1,bytes(range(256)));send(2,bytes(reversed(range(256))))
+    if mode=='exit':sys.exit(7)
+    if mode=='signal':os.kill(os.getpid(),signal.SIGTERM)
+    sys.exit(0)
+'''
+    open(tool,'w').write(original_tool.replace("a=sys.argv[1:]\n","a=sys.argv[1:]\n"+prefix))
     manifest=root+'/manifest';open(manifest,'wb').write(b'{}');_,e=r.snapshot(manifest,100)
     m={'roles':{k:{'path':tool,'sha256':hashlib.sha256(open(tool,'rb').read()).hexdigest()} for k in ['cc','cxx','link','workload']},'limits':dict(r.CEILINGS),'work':work,'output':out}
     # Remove ambient Python/loader controls before the recorder guard; nothing is forwarded.
     for k in list(os.environ):
         if k.startswith(('LD_','ASAN_','LSAN_','UBSAN_','GCC_','COMPILER_')) or k in ['PYTHONPATH','PYTHONHOME']: del os.environ[k]
-    def invoke(args,**options):
-        p=subprocess.run([sys.executable,'-I','-B','-S','-c',runner,sys.argv[1],json.dumps(m),json.dumps(e),json.dumps([r.b64(x) for x in args])],env={'PATH':'/usr/bin:/bin','LANG':'C','LC_ALL':'C',**options},stdout=subprocess.PIPE,stderr=subprocess.PIPE,timeout=8)
+    def invoke(args,_code=None,**options):
+        p=subprocess.run([sys.executable,'-I','-B','-S','-c',_code or runner,sys.argv[1],json.dumps(m),json.dumps(e),json.dumps([r.b64(x) for x in args])],env={'PATH':'/usr/bin:/bin','LANG':'C','LC_ALL':'C',**options},stdout=subprocess.PIPE,stderr=subprocess.PIPE,timeout=8)
         return p
     runner='''import importlib.util,sys,json,base64
 s=importlib.util.spec_from_file_location('r',sys.argv[1]);r=importlib.util.module_from_spec(s);s.loader.exec_module(r)
@@ -150,11 +257,52 @@ sys.exit(r.execute(json.loads(sys.argv[2]),json.loads(sys.argv[3]),'cc',[b'/cont
     args=[b'space value',b'quote"single\'',b'',b'-dash',b'\xff']
     direct=subprocess.run([os.fsencode(tool)]+args,env=r.FIXED_ENV,stdout=subprocess.PIPE,stderr=subprocess.PIPE)
     p=invoke(args);check(p.returncode==0);d,end=latest();start=json.load(open(d+'/start.json'))
+    check(p.stdout==direct.stdout and p.stderr==direct.stderr)
     check(open(d+'/stdout.bin','rb').read()==direct.stdout and open(d+'/stderr.bin','rb').read()==direct.stderr)
     check([base64.b64decode(x) for x in start['receivedArgvBase64']]==[b'/control/cc']+args)
     check([base64.b64decode(x) for x in start['forwardedArgvBase64']]==[os.fsencode(tool)]+args)
-    check('SECRET_TOKEN' not in open(d+'/stdout.bin').read());check(start['internalCollect2LdArgv']=='UNOBSERVED')
-    check(invoke(args,SECRET_TOKEN='never-forward').returncode==0)
+    for mode in [b'query',b'binary',b'exit',b'signal',b'burst']:
+        direct=subprocess.run([os.fsencode(tool),mode],env=r.FIXED_ENV,stdout=subprocess.PIPE,stderr=subprocess.PIPE,timeout=8)
+        p=invoke([mode]);d,end=latest()
+        check(p.returncode==direct.returncode and p.stdout==direct.stdout and p.stderr==direct.stderr)
+        for name,raw in [('stdout',p.stdout),('stderr',p.stderr)]:
+            check(open(d+'/'+name+'.bin','rb').read()==raw)
+            check(end['streams'][name]['bytes']==end['streams'][name]['relayedBytes']==len(raw))
+            check(end['streams'][name]['sha256']==end['streams'][name]['relayedSha256']==hashlib.sha256(raw).hexdigest())
+        check(end['status']=='CAPTURE_COMPLETE')
+    # A caller that does not drain cannot make the recorder wait forever or mark
+    # a partial relay complete. A closed caller stream must also fail closed.
+    m['limits']['seconds']=1
+    p=subprocess.Popen([sys.executable,'-I','-B','-S','-c',runner,sys.argv[1],json.dumps(m),json.dumps(e),json.dumps([r.b64(b'burst')])],env={'PATH':'/usr/bin:/bin','LANG':'C','LC_ALL':'C'},stdout=subprocess.PIPE,stderr=subprocess.PIPE)
+    check(p.wait(timeout=5)==125);p.communicate(timeout=2);check(latest()[1]['status']=='CAPTURE_INCOMPLETE')
+    m['limits']=dict(r.CEILINGS)
+    p=subprocess.Popen([sys.executable,'-I','-B','-S','-c',runner,sys.argv[1],json.dumps(m),json.dumps(e),json.dumps([r.b64(b'binary')])],env={'PATH':'/usr/bin:/bin','LANG':'C','LC_ALL':'C'},stdout=subprocess.PIPE,stderr=subprocess.PIPE)
+    p.stdout.close();check(p.wait(timeout=5)==125);p.stderr.close();check(latest()[1]['status']=='CAPTURE_INCOMPLETE')
+    short=runner.replace('sys.exit(r.execute', '''original=r.os.write
+def short_write(fd,data):return original(fd,data[:7])
+r.os.write=short_write
+sys.exit(r.execute''')
+    p=invoke([b'binary'],_code=short);d,end=latest();check(p.returncode==0)
+    check(p.stdout==bytes(range(256))==open(d+'/stdout.bin','rb').read())
+    check(p.stderr==bytes(reversed(range(256)))==open(d+'/stderr.bin','rb').read())
+    for fault in ['read','logger']:
+        injection='''original=r.durable
+def after_spawn(p,data):
+    original(p,data)
+    if p.endswith('/spawn.json'):
+        def broken(*args):raise OSError('synthetic read failure')
+        r.os.read=broken
+r.durable=after_spawn
+''' if fault=='read' else '''original=r.os.write
+def broken(fd,data):
+    if r.os.readlink('/proc/self/fd/'+str(fd)).endswith('.bin'):raise OSError('synthetic ENOSPC logger failure')
+    return original(fd,data)
+r.os.write=broken
+'''
+        p=invoke([b'binary'],_code=runner.replace('sys.exit(r.execute',injection+'sys.exit(r.execute'))
+        check(p.returncode==125 and latest()[1]['status']=='CAPTURE_INCOMPLETE')
+    check('SECRET_TOKEN' not in direct.stdout.decode('ascii',errors='ignore'));check(start['internalCollect2LdArgv']=='UNOBSERVED')
+    p=invoke(args,SECRET_TOKEN='never-forward');check(p.returncode==0 and b'SECRET_TOKEN' not in p.stdout and b'never-forward' not in p.stdout)
     response=work+'/args.rsp';data=b'"space value"\n\tother';open(response,'wb').write(data)
     check(invoke([b'@args.rsp',b'@args.rsp']).returncode==0);d,end=latest();rs=json.load(open(d+'/responses.json'))
     check([x['position'] for x in rs]==[0,1]);check(open(d+'/response-000000.bin','rb').read()==data)

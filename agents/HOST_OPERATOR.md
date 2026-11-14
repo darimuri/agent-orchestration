@@ -2312,8 +2312,9 @@ These are fixture ceilings, **not a Node budget**. Filesystem capacity is an enf
 storage ceiling, not a free-space estimate. Owner setup must account for filesystem
 metadata and reserved space. Lower recorder limits are allowed; raising a ceiling or
 using a nonfixture purpose fails validation. Docker daemon logging is disabled; raw
-child stdout/stderr are retained separately by the recorder. Docker attach metadata
-has a separate 1MiB bound per stream. Core dumps are disabled.
+child stdout/stderr are retained separately by the recorder. Docker control replies have a separate 1MiB bound per stream. Relayed attach bytes
+are retained as base64 under the same explicit stream/text ceilings, without UTF-8
+conversion. Core dumps are disabled.
 
 ### Manifest and explicit owner sequence
 
@@ -2401,7 +2402,16 @@ has single-link policy; installed immutable tool files may legitimately be multi
 linked. Fresh output artifacts have exclusive creation semantics.
 
 `stdout.bin` and `stderr.bin` retain separate bytes with counts/SHA-256 in atomic
-fsynced `completion.json`. A complete capture of a failing tool is CAPTURE_COMPLETE with the nonzero workload exit preserved through the owner runner; this is not a build PASS. Nonzero tool exits remain the same nonzero exit; tool
+fsynced `completion.json`. Each stream is also relayed byte-for-byte to its matching
+caller descriptor, with a separate bounded writer and FIFO (eight 64KiB queued
+chunks plus one in-flight chunk). The read loop pauses only a saturated stream,
+continues draining the other, and supervises the shared deadline/cancellation.
+Caller descriptor flags are not changed. Partial writes are retried; relay/read/
+logger failure or a caller that cannot drain by deadline is CAPTURE_INCOMPLETE.
+Evidence is spooled before enqueueing relay bytes. COMPLETE requires both writer
+queues to drain and both relayed byte counts/digests to equal the separate spools.
+An incomplete invocation can retain different observed prefixes; those prefixes
+are never certified complete. Cross-stream scheduling/timing may change. A complete capture of a failing tool is CAPTURE_COMPLETE with the nonzero workload exit preserved through the owner runner; this is not a build PASS. Nonzero tool exits remain the same nonzero exit; tool
 signals and cancellation are propagated and recorded. Deadline, quota/ENOSPC,
 logger failure, stream/response overflow, mutation, missing completion or resource
 termination remain CAPTURE_INCOMPLETE/BLOCKED. Catchable cancellation attempts a
@@ -2440,3 +2450,26 @@ checks cannot certify Docker/native behavior. A fresh exact-SHA Reviewer, owner
 fixture including failure retention, OCI mapping, direct replay and independent
 external sealing are mandatory before Ready. No native/G0–G4 or profile approval
 is implied by publication of the Draft PR.
+
+### R2 completion correction (AGE #22)
+
+The host may seal CAPTURE_COMPLETE only after every invocation has valid mandatory
+start/spawn/responses/completion metadata, both raw streams and every referenced
+response snapshot. It correlates received/forwarded base64 vectors (including
+argv0), fixed role/tool/environment/control-manifest identity, spawn PID/process
+group, monotonic ordering, response position/cwd/canonical path/stat/size/hash,
+stream/relay digests and raw returncode/signal/cancel consistency. Response artifact
+names are derived solely from their verified argument positions. Missing or corrupt
+stages, unrelated response metadata, absent snapshot bytes, or exit0 with signal9
+are CAPTURE_INCOMPLETE/BLOCKED, even when container inspect/wait report exit0.
+Directory inventory alone does not establish evidence completeness. These are
+structural completeness checks, not an attestation against the workload UID.
+
+R2 regressions include independent-style completion cases and whole-controller
+Docker/storage facades for the original false-complete reproductions. The mandatory
+Python fixture compares observable caller stdout/stderr AND retained spool bytes
+with direct fake-tool execution on query/binary/dual-stream volume/nonzero/signal
+paths, plus partial writes, unread/closed caller pipes and read/logger failure.
+Python/Docker absence remains a mandatory owner-fixture blocker; source/facade
+results do not prove real relay behavior or Node/V8/internal linker fidelity. A new
+Draft PR and fresh exact-SHA independent review are required; PR #68 stays untouched.

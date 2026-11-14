@@ -8,11 +8,13 @@ import base64
 import hashlib
 import json
 import os
+import queue
 import selectors
 import signal
 import stat
 import subprocess
 import sys
+import threading
 import time
 import uuid
 
@@ -27,6 +29,60 @@ CEILINGS = {'args': 10000, 'argvBytes': 1048576, 'responseFile': 1048576,
 
 class Blocked(Exception):
     pass
+
+
+class Relay:
+    """One bounded writer per caller stream, with no shared-fd flag changes.
+
+    A slow stdout cannot block stderr draining. At most eight 64KiB chunks per
+    stream are queued (plus one in-flight write). The supervising read loop owns
+    the deadline; stuck daemon writers cannot prevent an incomplete process exit.
+    """
+    def __init__(self, caller_fd):
+        self.fd = os.dup(caller_fd)
+        self.queue = queue.Queue(maxsize=8)
+        self.stopped = threading.Event()
+        self.error = None
+        self.bytes = 0
+        self.hash = hashlib.sha256()
+        self.thread = threading.Thread(target=self.write, daemon=True)
+        self.thread.start()
+
+    def write(self):
+        try:
+            while True:
+                chunk = self.queue.get()
+                try:
+                    if chunk is None:
+                        return
+                    view = memoryview(chunk)
+                    while view:
+                        require(not self.stopped.is_set(), 'relay stopped')
+                        try:
+                            n = os.write(self.fd, view)
+                        except BlockingIOError:
+                            self.stopped.wait(0.01)
+                            continue
+                        require(n > 0, 'relay short write')
+                        self.bytes += n
+                        self.hash.update(view[:n])
+                        view = view[n:]
+                finally:
+                    self.queue.task_done()
+        except Exception as exc:
+            self.error = exc
+        finally:
+            os.close(self.fd)
+
+    def pending(self):
+        with self.queue.all_tasks_done:
+            return self.queue.unfinished_tasks
+
+    def finish(self, deadline):
+        require(not self.pending() and self.error is None, 'relay not drained')
+        self.queue.put_nowait(None)
+        self.thread.join(max(0, deadline - time.monotonic()))
+        require(not self.thread.is_alive() and self.error is None, 'relay completion deadline/error')
 
 
 def require(ok, message):
@@ -214,6 +270,7 @@ def execute(m, manifest_evidence, role, received, output=None):
     # A durable intent exists even if snapshotting or spawning subsequently fails.
     durable(os.path.join(run, 'start.json'), json.dumps(start, sort_keys=True).encode()+b'\n')
     child, streams, cancel = None, {}, []
+    select = None
     old_handlers = {}
     outcome = {'schema': SCHEMA, 'status': 'CAPTURE_INCOMPLETE', 'returncode': None,
                'signal': None, 'blocker': 'missing completion', 'internalCollect2LdArgv': 'UNOBSERVED'}
@@ -231,22 +288,33 @@ def execute(m, manifest_evidence, role, received, output=None):
                                  stdout=subprocess.PIPE, stderr=subprocess.PIPE, start_new_session=True)
         durable(os.path.join(run, 'spawn.json'), json.dumps({'pid': child.pid, 'processGroup': child.pid}).encode()+b'\n')
         select = selectors.DefaultSelector()
-        for name, pipe in [('stdout', child.stdout), ('stderr', child.stderr)]:
+        for name, pipe, caller in [('stdout', child.stdout, 1), ('stderr', child.stderr, 2)]:
             fd = os.open(os.path.join(run, name+'.bin'), os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
-            streams[name] = {'fd': fd, 'bytes': 0, 'hash': hashlib.sha256()}
+            streams[name] = {'fd': fd, 'bytes': 0, 'hash': hashlib.sha256(), 'relay': Relay(caller),
+                             'pipe': pipe, 'paused': False, 'eof': False}
             os.set_blocking(pipe.fileno(), False)
             select.register(pipe, selectors.EVENT_READ, name)
         deadline = time.monotonic() + limits['seconds']
-        while select.get_map() or child.poll() is None:
+        while any(not s['eof'] or s['relay'].pending() for s in streams.values()) or child.poll() is None:
             require(not cancel, 'capture cancelled')
             require(time.monotonic() < deadline, 'capture deadline')
+            for name, stream in streams.items():
+                require(stream['relay'].error is None, 'caller relay write failure')
+                if stream['paused'] and not stream['relay'].queue.full():
+                    select.register(stream['pipe'], selectors.EVENT_READ, name)
+                    stream['paused'] = False
             for key, _mask in select.select(0.05):
+                stream = streams[key.data]
+                if stream['relay'].queue.full():
+                    select.unregister(key.fileobj)
+                    stream['paused'] = True
+                    continue
                 chunk = os.read(key.fileobj.fileno(), 65536)
                 if not chunk:
                     select.unregister(key.fileobj)
                     key.fileobj.close()
+                    stream['eof'] = True
                     continue
-                stream = streams[key.data]
                 require(stream['bytes'] + len(chunk) <= limits['stream'], 'stream overflow')
                 require(sum(x['bytes'] for x in streams.values()) + len(chunk) <= limits['text'], 'text overflow')
                 view = memoryview(chunk)
@@ -256,6 +324,14 @@ def execute(m, manifest_evidence, role, received, output=None):
                     view = view[n:]
                 stream['bytes'] += len(chunk)
                 stream['hash'].update(chunk)
+                # Spool first; caller never receives an unrecorded chunk. Queue
+                # capacity was checked before reading; only this thread enqueues.
+                stream['relay'].queue.put_nowait(chunk)
+        for stream in streams.values():
+            relay = stream['relay']
+            relay.finish(deadline)
+            require(relay.bytes == stream['bytes'] and relay.hash.digest() == stream['hash'].digest(),
+                    'caller/evidence byte mismatch')
         rc = child.wait(timeout=1)
         for item in responses:
             unchanged({k: item[k] for k in ('pathBase64', 'identity', 'sha256', 'size')})
@@ -266,6 +342,10 @@ def execute(m, manifest_evidence, role, received, output=None):
     except Exception as exc:
         outcome['blocker'] = type(exc).__name__ + ': ' + str(exc)
     finally:
+        if select is not None:
+            select.close()
+        for stream in streams.values():
+            stream['relay'].stopped.set()
         if child is not None:
             # Descendants may outlive a failed parent or keep pipes open; kill group.
             try:
@@ -283,7 +363,9 @@ def execute(m, manifest_evidence, role, received, output=None):
             for name, stream in streams.items():
                 os.fsync(stream['fd'])
                 os.close(stream['fd'])
-                outcome['streams'][name] = {'bytes': stream['bytes'], 'sha256': stream['hash'].hexdigest()}
+                outcome['streams'][name] = {'bytes': stream['bytes'], 'sha256': stream['hash'].hexdigest(),
+                                           'relayedBytes': stream['relay'].bytes,
+                                           'relayedSha256': stream['relay'].hash.hexdigest()}
             outcome['finishedMonotonicNs'] = time.monotonic_ns()
             durable(os.path.join(run, 'completion.json'), json.dumps(outcome, sort_keys=True).encode()+b'\n')
         finally:
