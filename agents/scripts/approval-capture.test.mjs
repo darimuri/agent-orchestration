@@ -474,6 +474,105 @@ function nativeHarness(f,extra={}){
   const body=js+'\nordinary=(p,bound)=>{const key=Object.keys(fixtureRaw).find(k=>"/native-fixture/"+k===p);if(!key)throw Error("missing native evidence");const b=fixtureRaw[key];if(!b||b.length>bound)throw Error("native evidence bound/missing "+key);return b;};\n({nativeAdmission,run})';
   return vm.runInNewContext(body,{fs,path,crypto:f.cryptoFacade,Buffer,setTimeout,clearTimeout,fixtureRaw:f.raw,output:f.m.output,spawn(){assert.fail('native path must never spawn');},...extra},{timeout:1000});
 }
+// Context-only rule paths: keep the valid rule hash and every action/input/argv
+// unchanged so a rejection can only come from the context-row path predicate.
+const contextPathCases=[
+  ['make variable','/work/node/\u0024(UNRESOLVED)/rule.mk',false],
+  ['literal dollar','/work/node/\u0024/rule.mk',false],
+  ['brace variable','/work/node/\u0024{NAME}/rule.mk',false],
+  ['parent segment','/work/node/out/../rule.mk',false],
+  ['dot segment','/work/node/./rule.mk',false],
+  ['double slash','/work/node//rule.mk',false],
+  ['trailing slash','/work/node/rule.mk/',false],
+  ['outside root','/work/other/rule.mk',false],
+  ['relative path','work/node/rule.mk',false],
+  ['canonical rule','/work/node/out/rule.mk',true],
+  ['canonical nested rule','/work/node/generated/a-b_1/rule.mk',true],
+];
+function contextPathFixture(contextPath){
+  const f=nativeEvidenceFixture();f.doc.context[1].path=contextPath;
+  f.raw.allowlist=Buffer.from(JSON.stringify(f.doc));
+  f.m.native.evidence.allowlist.sha256=digest(f.raw.allowlist);
+  return f;
+}
+for(const [label,contextPath,accepted]of contextPathCases)
+  test('context-only path predicate and mocked no-spawn STOP: '+label,async t=>{
+    const f=contextPathFixture(contextPath),h=helpers();
+    assert.equal(f.doc.context[1].sha256,f.doc.actions[0].ruleSha256);
+    assert.equal(digest(f.raw.allowlist),f.m.native.evidence.allowlist.sha256);
+    if(accepted)h.nativeActions(f.doc,f.m);
+    else {
+      assert.throws(()=>h.nativeActions(f.doc,f.m),/^Error: supplemental retained context hashes$/);
+      // Repair only the path: identical hashes/actions must then validate.
+      const repaired=clone(f.doc);repaired.context[1].path='/work/node/out/rule.mk';
+      h.nativeActions(repaired,f.m);
+    }
+    const dir=fs.mkdtempSync(path.join(os.tmpdir(),'context-path-stop-'));
+    t.after(()=>fs.rmSync(dir,{recursive:true,force:true}));f.m.output=dir;
+    assert.equal(await nativeHarness(f).run(f.m),125);
+    const report=JSON.parse(fs.readFileSync(path.join(dir,'native-admission.json')));
+    assert.equal(report.status,accepted?'STOP_NATIVE_ACTION_BOUNDARY_UNIMPLEMENTED':'STOP_NATIVE_ADMISSION');
+    if(!accepted)assert.equal(report.blocker,'supplemental retained context hashes');
+    assert.equal(report.nativeExecution,'NOT_STARTED');assert.equal(report.capture,'NOT_STARTED');
+    assert(!fs.existsSync(path.join(dir,'seal.json')));
+  });
+test('context path source parity wiring (static evidence only)',()=>{
+  const host=js.slice(js.indexOf('function nativeActions('),js.indexOf('function nativeInputs('));
+  assert(host.indexOf('const workPath=')<host.indexOf('need(Array.isArray(doc.context)'));
+  assert(host.includes('doc.context.every(f=>workPath(f?.path)&&sha(f.sha256))'));
+  const py=fs.readFileSync(recorder,'utf8');
+  assert.match(py,/def work_path\(p\):\n        return [^\n]+and '\u0024' not in p/);
+  assert(py.includes("work_path(f.get('path')) and native_sha(f.get('sha256'))"));
+});
+test('MANDATORY real Python context-only parser parity; mocked evidence and denied helper spawn',()=>{
+  assert(fs.existsSync('/usr/bin/python3'),'mandatory /usr/bin/python3 unavailable; context-path Python parity NOT VERIFIED');
+  const f=nativeEvidenceFixture();
+  const payload={manifest:f.m.recorder,doc:f.doc,cases:contextPathCases,
+    raw:Object.fromEntries(Object.entries(f.raw).map(([k,b])=>[k,b.toString('base64')]))};
+  const code=String.raw`
+import base64, contextlib, hashlib, importlib.util, io, json, sys
+spec=importlib.util.spec_from_file_location('capture',sys.argv[1])
+r=importlib.util.module_from_spec(spec);spec.loader.exec_module(r)
+payload=json.load(sys.stdin)
+def denied(*args,**kwargs):
+    raise AssertionError('context admission attempted helper/tool spawn')
+r.subprocess.Popen=denied;r.tool_identity=denied
+for label,path,accepted in payload['cases']:
+    m=json.loads(json.dumps(payload['manifest']));doc=json.loads(json.dumps(payload['doc']))
+    doc['context'][1]['path']=path
+    assert doc['context'][1]['sha256']==doc['actions'][0]['ruleSha256']
+    try:
+        r.native_actions(doc,m)
+        assert accepted,label
+    except r.Blocked as exc:
+        assert not accepted and str(exc)=='supplemental retained context hashes',(label,str(exc))
+        repaired=json.loads(json.dumps(doc));repaired['context'][1]['path']='/work/node/out/rule.mk'
+        r.native_actions(repaired,m)
+    raw={k:base64.b64decode(v) for k,v in payload['raw'].items()}
+    raw['allowlist']=json.dumps(doc).encode()
+    m['native']['evidence']['allowlist']['sha256']=hashlib.sha256(raw['allowlist']).hexdigest()
+    # Historical identity bytes are unavailable: snapshot custody is explicitly
+    # mocked; the allowlist uses its real digest and native_actions is unchanged.
+    def snapshot(p,limit):
+        if p=='/synthetic/manifest':return json.dumps(m).encode(),{}
+        key=next(k for k,v in m['native']['evidence'].items() if v['path']==p)
+        assert len(raw[key])<=limit
+        sha=hashlib.sha256(raw[key]).hexdigest() if key=='allowlist' else m['native']['evidence'][key]['sha256']
+        return raw[key],{'sha256':sha}
+    r.snapshot=snapshot;r.sys.argv=['recorder','native-admission','/synthetic/manifest']
+    output=io.StringIO()
+    with contextlib.redirect_stdout(output):assert r.main()==125
+    report=json.loads(output.getvalue())
+    assert report['status']==('STOP_NATIVE_ACTION_BOUNDARY_UNIMPLEMENTED' if accepted else 'STOP_NATIVE_ADMISSION')
+    if not accepted:assert report['blocker']=='supplemental retained context hashes'
+    assert report['nativeExecution']==report['capture']=='NOT_STARTED'
+print('actual Python context parser cases='+str(len(payload['cases']))+'; evidence custody mocked; no helper spawn')
+`;
+  const result=spawnSync('/usr/bin/python3',['-I','-B','-S','-c',code,recorder],{
+    input:JSON.stringify(payload),env:{PATH:'/usr/bin:/bin',LANG:'C',LC_ALL:'C'},encoding:'utf8',timeout:10000,maxBuffer:1048576});
+  assert.ifError(result.error);assert.equal(result.status,0,result.stderr);
+  assert.match(result.stdout,/actual Python context parser cases=11; evidence custody mocked; no helper spawn/);
+});
 test('complete synthetic native admission still persists STOP before Docker/spawn',async t=>{
   const f=nativeEvidenceFixture(),dir=fs.mkdtempSync(path.join(os.tmpdir(),'native-stop-'));t.after(()=>fs.rmSync(dir,{recursive:true,force:true}));f.m.output=dir;
   const h=nativeHarness(f);assert.equal(h.nativeAdmission(f.m).status,'STOP_NATIVE_ACTION_BOUNDARY_UNIMPLEMENTED');

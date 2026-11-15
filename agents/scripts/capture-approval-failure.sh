@@ -123,8 +123,8 @@ function nativeActions(doc,m){
   need(Array.isArray(doc.unresolved)&&doc.unresolved.length===0,'STOP_UNRESOLVED_TRANSITIVE_CLOSURE');
   need(doc.taskCount===n.taskCount&&Array.isArray(doc.actions)&&doc.actions.length===n.taskCount,'supplemental exact task count');
   const seen=new Set(),outputs=new Set();
-  need(Array.isArray(doc.context)&&doc.context.length>0&&doc.context.length<=20000&&doc.context.every(f=>typeof f?.path==='string'&&f.path.startsWith('/work/node/')&&path.resolve(f.path)===f.path&&sha(f.sha256)),'supplemental retained context hashes');
   const workPath=p=>typeof p==='string'&&p.startsWith('/work/node/')&&path.resolve(p)===p&&!p.includes('$');
+  need(Array.isArray(doc.context)&&doc.context.length>0&&doc.context.length<=20000&&doc.context.every(f=>workPath(f?.path)&&sha(f.sha256)),'supplemental retained context hashes');
   need(new Set(doc.context.map(f=>f.path)).size===doc.context.length,'duplicate context path');
   const input=item=>{keys(item,['path','sha256'],'action input');need(workPath(item.path)&&sha(item.sha256)&&doc.context.some(f=>f.path===item.path&&f.sha256===item.sha256),'action input/context hash');};
   for(const a of doc.actions){
