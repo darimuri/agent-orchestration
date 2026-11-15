@@ -12,7 +12,7 @@ const script=fileURLToPath(new URL('./capture-approval-failure.sh',import.meta.u
 const recorder=fileURLToPath(new URL('./approval-capture-recorder.py',import.meta.url));
 const sh=fs.readFileSync(script,'utf8');
 const js=sh.slice(sh.indexOf("const schema="),sh.indexOf('\ntry{\n  need(['));
-function helpers(extra={}){return vm.runInNewContext(js+'\n({env,dockerConfig,validate,mapping,imageEnvironment,recorderCommand,createArgs,containerIdentity,completion,inventory,ordinary,wrapper,run,storage,docker})',{
+function helpers(extra={}){return vm.runInNewContext(js+'\n({nativePolicy,nativePurpose,nativeCommand,validateNative,nativeActions,nativeInputs,nativeAdmission,env,dockerConfig,validate,mapping,imageEnvironment,recorderCommand,createArgs,containerIdentity,completion,inventory,ordinary,wrapper,run,storage,docker})',{
   fs,path,crypto,Buffer,setTimeout,clearTimeout,process:{argv:[]},...extra}, {timeout:1000});}
 const digest=b=>crypto.createHash('sha256').update(b).digest('hex');
 function fixture(){
@@ -390,6 +390,119 @@ test('bounded storage/Docker facade executes failed attach→stop→wait→inspe
   assert.equal(JSON.parse(fs.readFileSync(path.join(m.output,'seal.json'))).status,'CAPTURE_INCOMPLETE');
 });
 
+test('native recorder policy matches host pins and has no duplicate top-level functions',()=>{
+  const source=fs.readFileSync(recorder,'utf8');
+  const policy=source.match(/NATIVE_POLICY = json.loads\(r'''([\s\S]*?)'''\)/);
+  assert(policy);assert.deepEqual(JSON.parse(policy[1]),clone(helpers().nativePolicy));
+  const names=Array.from(source.matchAll(/^def ([a-z_]+)\(/gm),m=>m[1]);
+  assert.equal(new Set(names).size,names.length);
+  assert.equal((source.match(/^if __name__ == '__main__':/gm)||[]).length,1);
+});
+
+// Native fixtures below are synthetic policy data, not historical B0/archive or
+// executable B1 closure evidence. No Docker, make, configure or compiler runs.
+const clone=value=>JSON.parse(JSON.stringify(value));
+function nativeFixture(){
+  const p=clone(helpers().nativePolicy),m=fixture();m.purpose=helpers().nativePurpose;
+  delete m.fixtureArgvBase64;m.source='/native-fixture';m.resources=clone(p.resources);m.image=p.repository;m.imageId=p.imageId;
+  m.recorder.purpose=m.purpose;m.recorder.roles.generator={path:'/usr/bin/python3',sha256:'a'.repeat(64)};
+  m.recorder.roles.workload={path:'/usr/bin/make',sha256:'b'.repeat(64)};
+  m.recorder.limits.seconds=1500;m.recorder.resources=clone(m.resources);
+  const identity=Object.fromEntries(Object.entries(p).filter(([k])=>!['goal','jobs','actionMaximum','deadlines','resources'].includes(k)));
+  const pins={b0:'b0Sha256',lock:'lockSha256',archive:'archiveSha256',context:'contextSha256',sourceAdmission:'sourceAdmissionSha256',graphReport:'graphReportSha256',decision:'decisionSha256',correction:'correctionSha256'};
+  const evidence=Object.fromEntries(['b0','allowlist','lock','archive','tools','context','sourceAdmission','graphReport','decision','correction'].map(k=>[k,{path:'/native-fixture/'+k,sha256:p[pins[k]]??'c'.repeat(64)}]));
+  m.native={identity,goal:p.goal,jobs:1,command:Array.from(helpers().nativeCommand()),deadlines:clone(p.deadlines),taskCount:1,evidence};m.recorder.native=m.native;
+  const source={path:'/work/node/src/synthetic.cc',sha256:'d'.repeat(64)},rule={path:'/work/node/out/synthetic.mk',sha256:'e'.repeat(64)};
+  const action={id:'compile',role:'cxx',tool:clone(m.recorder.roles.cxx),argvBase64:[m.recorder.roles.cxx.path,'-c',source.path,'-o','/work/node/out/'+p.goal].map(x=>Buffer.from(x).toString('base64')),cwd:'/work/node/out',inputs:[source],outputs:['/work/node/out/'+p.goal],dependencies:[],orderOnly:[],ruleSha256:rule.sha256,seconds:300};
+  const doc={schema:'buzz.native-microtarget-actions/v1',b0Sha256:p.b0Sha256,goal:p.goal,taskCount:1,actions:[action],unresolved:[],context:[source,rule]};
+  return {m,p,doc};
+}
+test('native purpose has separate fixed tuple, single make goal, budgets and role set',()=>{
+  const {m,doc}=nativeFixture(),h=helpers();h.validate(m);h.nativeActions(doc,m);
+  assert.equal(m.native.taskCount,1);assert.equal(m.resources.memory,8589934592);assert.equal(m.native.command.at(-2),'-j1');
+  assert.throws(()=>h.recorderCommand(m),/STOP_NATIVE_ACTION_BOUNDARY_UNIMPLEMENTED/);
+  assert.throws(()=>h.createArgs(m,'native'),/STOP_NATIVE_ACTION_BOUNDARY_UNIMPLEMENTED/);
+  assert.throws(()=>h.completion(m,{}),/STOP_NATIVE_ACTION_BOUNDARY_UNIMPLEMENTED/);
+  const old=fixture();h.validate(old);assert.equal(old.resources.memory,2147483648);assert.equal(old.recorder.limits.seconds,30);
+});
+for(const [label,change]of [
+  ['version',m=>m.purpose+='2'],['source identity',m=>m.native.identity.approvalSource='0'.repeat(40)],
+  ['B0 identity',m=>m.native.identity.b0Sha256='0'.repeat(64)],['archive identity',m=>m.native.identity.archiveSha256='0'.repeat(64)],
+  ['lock identity',m=>m.native.evidence.lock.sha256='0'.repeat(64)],['context identity',m=>m.native.evidence.context.sha256='0'.repeat(64)],
+  ['source-admission identity',m=>m.native.evidence.sourceAdmission.sha256='0'.repeat(64)],
+  ['image repository',m=>m.image='elsewhere@'+m.image.split('@')[1]],['config ID',m=>m.imageId='sha256:'+'0'.repeat(64)],['platform',m=>m.platform='linux/arm64'],
+  ['default-all',m=>m.native.command.pop()],['extra target',m=>m.native.command.push('all')],['install',m=>m.native.command[6]='install'],['mksnapshot link',m=>m.native.command[6]='Release/mksnapshot'],
+  ['parallel jobs',m=>m.native.command[5]='-j2'],['configure',m=>m.native.command=['/usr/bin/python3','configure']],
+  ['missing task count',m=>delete m.native.taskCount],['aggregate15 count',m=>m.native.taskCount='15'],['task cap',m=>m.native.taskCount=257],
+  ['missing allowlist',m=>delete m.native.evidence.allowlist],['missing allowlist hash',m=>delete m.native.evidence.allowlist.sha256],
+  ['missing tool hash',m=>delete m.recorder.roles.generator.sha256],['unknown role',m=>m.recorder.roles.shell=m.recorder.roles.generator],
+  ['caller argv',m=>m.fixtureArgvBase64=[]],['environment override',m=>m.recorder.environment.CFLAGS='-O0'],
+  ['CPU cap',m=>m.resources.cpus=3],['memory cap',m=>m.resources.memory++],['swap field',m=>m.resources.swap=1],['pids cap',m=>m.resources.pids++],
+  ['outer cap',m=>m.resources.seconds++],['work quota',m=>m.resources.work++],['output quota',m=>m.resources.output++],
+  ['make deadline',m=>m.native.deadlines.workload++],['compiler deadline',m=>m.native.deadlines.cxx++],['generator deadline',m=>m.native.deadlines.generator++],['bootstrap deadline',m=>m.native.deadlines.link++],
+  ['record cap',m=>m.recorder.limits.records=20001],['insufficient records',m=>m.recorder.limits.records=1],['stream cap',m=>m.resources.stream=67108865],
+  ['outside evidence projection',m=>m.native.evidence.allowlist.path='/outside/allowlist'],['relative evidence',m=>m.native.evidence.allowlist.path='relative'],['custody root',m=>m.dockerCustodyRoot='/different'],
+])test('native metadata rejects '+label,()=>{const {m}=nativeFixture();change(m);assert.throws(()=>helpers().validateNative(m));});
+for(const [label,change]of [
+  ['unresolved expansion',d=>d.unresolved=['$(OBJS)']],['count disagreement',d=>d.taskCount=15],['missing transitive edge',d=>d.actions[0].dependencies=['missing']],
+  ['unknown helper',d=>d.actions[0].role='shell'],['tool substitution',d=>d.actions[0].tool.path='/usr/bin/unlisted-helper'],
+  ['missing rule hash',d=>delete d.actions[0].ruleSha256],['wrong rule hash',d=>d.actions[0].ruleSha256='f'.repeat(64)],
+  ['missing input hash',d=>delete d.actions[0].inputs[0].sha256],['context mismatch',d=>d.context=[]],['duplicate context',d=>d.context.push(d.context[0])],
+  ['expanded argv missing',d=>d.actions[0].argvBase64=[]],['unexpanded argv',d=>d.actions[0].argvBase64.push(Buffer.from('$(OBJS)').toString('base64'))],
+  ['noncanonical argv',d=>d.actions[0].argvBase64.push('!!!!')],['wrong argv0',d=>d.actions[0].argvBase64[0]=Buffer.from('/usr/bin/else').toString('base64')],
+  ['output escape',d=>d.actions[0].outputs=['/tmp/escape']],['mksnapshot output',d=>d.actions[0].outputs=['/work/node/out/Release/mksnapshot']],
+  ['goal output missing',d=>d.actions[0].outputs=['/work/node/out/other.o']],['compiler cap',d=>d.actions[0].seconds=301],
+])test('supplemental actions reject '+label,()=>{const {m,doc}=nativeFixture();change(doc);assert.throws(()=>helpers().nativeActions(doc,m));});
+function nativeEvidenceFixture(){
+  const f=nativeFixture(),{m,p,doc}=f,pack=Object.fromEntries(Array.from({length:200},(_,i)=>['synthetic-package-'+i,'1']));
+  const raw={b0:Buffer.from(JSON.stringify({schema:'darimuri.age20.solution2-b0-closure/v1',goal:p.goal,classification:'NEW_REPRODUCTION_NOT_RECOVERED_R2',status:'B0_READ_ONLY_CLOSURE_COMPLETE_NATIVE_EXECUTION_BLOCKED'})),
+    lock:Buffer.from(JSON.stringify({nodeVersion:'26.13.1',nodeSourceSha256:p.archiveSha256,builderImage:p.repository,platform:p.platform,gccVersion:'13.3.0',target:{commit:p.approvalSource,tree:p.approvalTree},packages:pack})),
+    tools:Buffer.from(JSON.stringify({toolchain:'gcc-13.3.0;x86_64-linux-gnu;python-3.12.3;make-4.3',gccVersion:'13.3.0',packages:pack,records:Object.values(m.recorder.roles).map(t=>({realpath:t.path,sha256:t.sha256}))})),
+    allowlist:Buffer.from(JSON.stringify(doc))};
+  for(const k of Object.keys(m.native.evidence))raw[k]??=Buffer.from('SYNTHETIC POLICY LABEL ONLY: '+k);
+  // Historical raw bytes are unavailable. Only this explicit digest boundary
+  // maps synthetic fixture bytes to historical labels; allowlist/tools use real
+  // SHA256. No production hash pin or schema is weakened by the test.
+  const labels=new Map();for(const [k,b]of Object.entries(raw)){
+    if(['allowlist','tools'].includes(k))m.native.evidence[k].sha256=digest(b);
+    else labels.set(digest(b),m.native.evidence[k].sha256);
+  }
+  const cryptoFacade={...crypto,createHash(alg){const hash=crypto.createHash(alg);return {update(b){hash.update(b);return this;},digest(encoding){const actual=hash.digest('hex'),value=labels.get(actual)??actual;return encoding==='hex'?value:Buffer.from(value,'hex');}};}};
+  return {...f,raw,cryptoFacade};
+}
+function nativeHarness(f,extra={}){
+  const body=js+'\nordinary=(p,bound)=>{const key=Object.keys(fixtureRaw).find(k=>"/native-fixture/"+k===p);if(!key)throw Error("missing native evidence");const b=fixtureRaw[key];if(!b||b.length>bound)throw Error("native evidence bound/missing "+key);return b;};\n({nativeAdmission,run})';
+  return vm.runInNewContext(body,{fs,path,crypto:f.cryptoFacade,Buffer,setTimeout,clearTimeout,fixtureRaw:f.raw,output:f.m.output,spawn(){assert.fail('native path must never spawn');},...extra},{timeout:1000});
+}
+test('complete synthetic native admission still persists STOP before Docker/spawn',async t=>{
+  const f=nativeEvidenceFixture(),dir=fs.mkdtempSync(path.join(os.tmpdir(),'native-stop-'));t.after(()=>fs.rmSync(dir,{recursive:true,force:true}));f.m.output=dir;
+  const h=nativeHarness(f);assert.equal(h.nativeAdmission(f.m).status,'STOP_NATIVE_ACTION_BOUNDARY_UNIMPLEMENTED');
+  assert.equal(await h.run(f.m),125);const report=JSON.parse(fs.readFileSync(path.join(dir,'native-admission.json')));
+  assert.equal(report.status,'STOP_NATIVE_ACTION_BOUNDARY_UNIMPLEMENTED');assert.equal(report.nativeExecution,'NOT_STARTED');assert.equal(report.capture,'NOT_STARTED');assert(!fs.existsSync(path.join(dir,'seal.json')));
+  await assert.rejects(()=>h.run(f.m),/fresh canonical/);
+});
+for(const key of ['allowlist','tools','b0','context','archive','lock','sourceAdmission'])
+  test('raw native '+key+' mutation stops admission before any execution',()=>{const f=nativeEvidenceFixture();f.raw[key]=Buffer.from('mutated');const result=nativeHarness(f).nativeAdmission(f.m);assert.equal(result.status,'STOP_NATIVE_ADMISSION');assert.match(result.blocker,/raw evidence hash/);});
+test('missing supplemental input and unlisted helper stop earlier than final boundary',()=>{
+  for(const fault of ['missing','helper','count','tool-inventory','toolchain']){
+    const f=nativeEvidenceFixture();
+    if(fault==='missing')delete f.raw.allowlist;
+    else if(fault==='tool-inventory'||fault==='toolchain'){const tools=JSON.parse(f.raw.tools);if(fault==='tool-inventory')tools.records=[];else tools.toolchain='unlisted';f.raw.tools=Buffer.from(JSON.stringify(tools));f.m.native.evidence.tools.sha256=digest(f.raw.tools);}
+    else {const doc=clone(f.doc);if(fault==='helper')doc.actions[0].role='shell';else doc.taskCount=15;f.raw.allowlist=Buffer.from(JSON.stringify(doc));f.m.native.evidence.allowlist.sha256=digest(f.raw.allowlist);}
+    const result=nativeHarness(f).nativeAdmission(f.m);assert.equal(result.status,'STOP_NATIVE_ADMISSION');assert.notEqual(result.blocker,'No reviewed descendant/action-boundary enforcement; no native Docker or tool launch');
+  }
+});
+test('native missing metadata produces precise STOP and no Docker call',async t=>{
+  const {m}=nativeFixture(),dir=fs.mkdtempSync(path.join(os.tmpdir(),'native-invalid-'));t.after(()=>fs.rmSync(dir,{recursive:true,force:true}));m.output=dir;delete m.native.taskCount;
+  const h=helpers({output:dir,spawn(){assert.fail('native metadata must not spawn');}});
+  assert.equal(await h.run(m),125);const report=JSON.parse(fs.readFileSync(path.join(dir,'native-admission.json')));assert.equal(report.status,'STOP_NATIVE_ADMISSION');assert.match(report.blocker,/native profile keys/);
+});
+test('runner and recorder native policy constants agree; no native execute path',()=>{
+  const py=fs.readFileSync(recorder,'utf8'),json=py.match(/NATIVE_POLICY = json.loads\(r'''([\s\S]*?)'''\)/)[1];
+  assert.deepEqual(JSON.parse(json),clone(helpers().nativePolicy));
+  assert.match(py,/def execute\([^\n]*\):\n    require\([^\n]+startswith\('owner-nodev8-prerequisite-measurement'\)[^\n]+STOP_NATIVE_ACTION_BOUNDARY_UNIMPLEMENTED/);
+});
+
 // These are executable behavior fixtures, never a source-pattern substitute for
 // Python, Docker, Node/V8 fidelity or the independent owner replay gate.
 const behavior=String.raw`
@@ -397,6 +510,27 @@ import importlib.util, os, sys, tempfile, json, hashlib, base64, subprocess, sig
 spec=importlib.util.spec_from_file_location('capture',sys.argv[1]); r=importlib.util.module_from_spec(spec);spec.loader.exec_module(r)
 def check(ok):
     if not ok: raise AssertionError('synthetic capture invariant')
+native_payload=json.loads(sys.argv[2]);native=native_payload['manifest'];actions=native_payload['actions']
+r.native_metadata(native);r.native_actions(actions,native)
+for field in ['goal','taskCount','evidence']:
+    bad=json.loads(json.dumps(native));del bad['native'][field]
+    try:r.native_metadata(bad);raise AssertionError('missing native metadata accepted')
+    except r.Blocked:pass
+for role in ['cc','cxx','link','generator','workload','unlisted']:
+    try:r.execute(native,{},role,[b'/control/'+role.encode()]);raise AssertionError('native execute accepted')
+    except r.Blocked as exc:check('STOP_NATIVE_ACTION_BOUNDARY_UNIMPLEMENTED' in str(exc))
+original_snapshot=r.snapshot
+fixture_raw={k:base64.b64decode(v) for k,v in native_payload['raw'].items()}
+def native_snapshot(p,limit):
+    key=next(k for k,v in native['native']['evidence'].items() if v['path']==p)
+    data=fixture_raw[key];check(len(data)<=limit)
+    return data,{'sha256':native['native']['evidence'][key]['sha256']}
+r.snapshot=native_snapshot
+check(r.native_admission(native)['status']=='STOP_NATIVE_ACTION_BOUNDARY_UNIMPLEMENTED')
+bad=json.loads(json.dumps(actions));bad['actions'][0]['role']='unlisted-helper'
+fixture_raw['allowlist']=json.dumps(bad).encode()
+check(r.native_admission(native)['status']=='STOP_NATIVE_ADMISSION')
+r.snapshot=original_snapshot
 with tempfile.TemporaryDirectory(prefix='capture-behavior-') as root:
     work=root+'/work';out=root+'/output';os.mkdir(work);os.mkdir(out);os.chdir(work)
     tool=root+'/fake';open(tool,'w').write('#!'+sys.executable+'\n'+'''import os,sys,json,signal,time
@@ -568,6 +702,6 @@ print('synthetic behavior and direct replay only; Node/internal linker fidelity 
 `;
 test('MANDATORY real Python recorder behavior and direct-vs-recorded synthetic replay',()=>{
   assert(fs.existsSync('/usr/bin/python3'),'mandatory /usr/bin/python3 unavailable; recorder behaviors NOT VERIFIED');
-  const r=spawnSync('/usr/bin/python3',['-I','-B','-S','-c',behavior,recorder],{env:{PATH:'/usr/bin:/bin',LANG:'C',LC_ALL:'C'},encoding:'utf8',timeout:45000,maxBuffer:1024*1024});
+  const r=spawnSync('/usr/bin/python3',['-I','-B','-S','-c',behavior,recorder,JSON.stringify((()=>{const f=nativeEvidenceFixture();return {manifest:f.m.recorder,actions:f.doc,raw:Object.fromEntries(Object.entries(f.raw).map(([k,b])=>[k,b.toString('base64')]))};})())],{env:{PATH:'/usr/bin:/bin',LANG:'C',LC_ALL:'C'},encoding:'utf8',timeout:45000,maxBuffer:1024*1024});
   assert.ifError(r.error);assert.equal(r.status,0,r.stderr);assert.match(r.stdout,/NOT_PROVEN/);
 });
