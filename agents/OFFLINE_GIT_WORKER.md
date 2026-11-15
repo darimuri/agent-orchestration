@@ -282,7 +282,16 @@ Source coverage present (execution requires a compiler):
 - Actual broker/validator-peer processes cover valid settlement, replay/cross-binding
   rejection, validator EOF/death and broker kill/EOF without a success response.
 - Actual guardian/pidfd paths cover normal/nonzero controller exit and loss of the
-  outer lifeline. Regular files explicitly model cgroup identity/populated/kill
+  outer lifeline. The R3 owner-loss fixture closes both inherited pipe ends in
+  the forked non-owner controller, leaving the simulated launcher as the sole
+  writer; that launcher then closes its writer. It requires monotonic completion
+  in less than3000ms (the2000ms settlement budget plus1000ms fixture allowance),
+  with a separate5s fail-fast alarm, so the40s outer timeout cannot pass this
+  case. It observes exactly one controller reap with SIGKILL, the expected kill
+  action, terminal pidfd readiness, ECHILD and post-reap pidfd ESRCH. The earlier
+  R2 fixture retained a child writer and could pass after40s; its passing result
+  is not evidence of owner-loss cancellation. No separate outer-timeout test is
+  claimed by this case. Regular files explicitly model cgroup identity/populated/kill
   observations; these observations are SYNTHETIC, not actual cgroup enforcement.
 - The production adoption handoff, not a reimplemented transaction, runs in a
   disposable child: successful receipt plus all eight fsync positions with EIO,

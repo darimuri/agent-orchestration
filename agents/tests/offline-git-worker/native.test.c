@@ -5,8 +5,17 @@
 #include <assert.h>
 #include <fcntl.h>
 #include <signal.h>
+#include <sys/wait.h>
 static unsigned fault,fsync_at,fsync_count,crash_kind;
 static int mutate_fd=-1;
+static pid_t observed_controller;
+static unsigned controller_reaps;
+static int controller_status;
+static pid_t observe_waitpid(pid_t pid,int *status,int options){
+ int local_status;int *out=status?status:&local_status;pid_t result=waitpid(pid,out,options);
+ if(result>0&&result==observed_controller){controller_reaps++;controller_status=*out;}
+ return result;
+}
 static ssize_t fault_write(int fd,const void *bytes,size_t n){
  if(fault==1U)return write(fd,bytes,n>1U?1U:n);
  if(fault==2U)return 0;
@@ -24,11 +33,13 @@ static int fault_fsync(int fd){
 #define write fault_write
 #define fstat fault_fstat
 #define fsync fault_fsync
+#define waitpid observe_waitpid
 #include "../../offline-git-worker/native/supervisor.c"
 #include "../../offline-git-worker/native/custody.c"
 #undef write
 #undef fstat
 #undef fsync
+#undef waitpid
 static void digest_vector(const char *text,const char *expected){ogw_sha256 h;uint8_t digest[32];char encoded[65];ogw_hash_init(&h);ogw_hash_update(&h,text,strlen(text));ogw_hash_final(&h,digest);hex32(digest,encoded);assert(!strcmp(encoded,expected));}
 static void primitives(void){
  char temporary[]="/tmp/ogw-native-XXXXXX";assert(mkdtemp(temporary));int root=open(temporary,O_RDONLY|O_DIRECTORY|O_CLOEXEC);assert(root>=0);
@@ -112,12 +123,32 @@ static void guardian_cases(void){
   char name[]="ogw-guardian-XXXXXX";assert(mkdtemp(name));int group=open(name,O_RDONLY|O_DIRECTORY|O_CLOEXEC);assert(group>=0);
   store(group,"cgroup.events","populated 0\n");store(group,"cgroup.kill","");
   int owners[2];assert(pipe2(owners,O_CLOEXEC)==0);uint8_t config[496];memset(config,1,sizeof(config));struct stat st;uint64_t mount;assert(fstat(group,&st)==0&&ogw_mount_id(group,&mount));ogw_put(config+384,(uint64_t)st.st_dev,8);ogw_put(config+392,(uint64_t)st.st_ino,8);ogw_put(config+400,mount,8);
-  pid_t controller_pid=fork();assert(controller_pid>=0);if(controller_pid==0){if(scenario==2U){for(;;)pause();}_exit(scenario==0U?0:70);}
+  pid_t controller_pid=fork();assert(controller_pid>=0);if(controller_pid==0){
+   // The simulated launcher is the ONLY lifeline writer. O_CLOEXEC alone
+   // cannot close a writer in this fork-only, paused non-owner process.
+   assert(close(owners[0])==0&&close(owners[1])==0);
+   if(scenario==2U){for(;;)pause();}_exit(scenario==0U?0:70);
+  }
   int pidfd=(int)syscall(SYS_pidfd_open,controller_pid,0U);assert(pidfd>=0);
   // Duplicate through high FDs to avoid overwriting group or pipe descriptors.
   int g=fcntl(group,F_DUPFD_CLOEXEC,50),o=fcntl(owners[0],F_DUPFD_CLOEXEC,50);assert(g>=0&&o>=0);assert(dup2(g,4)>=0&&dup2(o,7)>=0);
-  if(scenario==2U){assert(close(owners[1])==0);owners[1]=-1;}
-  int result=guard_controller(controller_pid,pidfd,config,now_ms());assert(result==(scenario==0U?0:70));
+  observed_controller=controller_pid;controller_reaps=0;controller_status=0;
+  uint64_t started=now_ms();
+  if(scenario==2U){
+   assert(close(owners[1])==0);owners[1]=-1;
+   // A retained writer must fail promptly, not pass after the 40s timeout.
+   assert(signal(SIGALRM,SIG_DFL)!=SIG_ERR);(void)alarm(5);
+  }
+  int result=guard_controller(controller_pid,pidfd,config,started);
+  if(scenario==2U){
+   (void)alarm(0);uint64_t elapsed=now_ms()-started;
+   assert(elapsed<OGW_SETTLE_MS+1000U&&OGW_SETTLE_MS+1000U<OGW_OUTER_MS);
+   assert(controller_reaps==1U&&WIFSIGNALED(controller_status)&&WTERMSIG(controller_status)==SIGKILL);
+   char action[8];assert(read_small(group,"cgroup.kill",action,sizeof(action))&&strcmp(action,"1")==0);
+   int status;assert(waitpid(controller_pid,&status,WNOHANG)<0&&errno==ECHILD);
+   struct pollfd terminal={.fd=pidfd,.events=POLLIN};assert(poll(&terminal,1U,0)==1&&(terminal.revents&POLLIN));
+  }
+  assert(result==(scenario==0U?0:70));observed_controller=0;
   assert(signal_controller(pidfd,true)); // already reaped => never signals
   assert(syscall(SYS_pidfd_send_signal,pidfd,0,NULL,0U)<0&&errno==ESRCH);
   if(owners[1]>=0)assert(close(owners[1])==0);(void)close(owners[0]);assert(close(pidfd)==0&&close(g)==0&&close(o)==0);(void)close(group);
