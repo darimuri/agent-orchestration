@@ -28,11 +28,11 @@ launcher or its capsule factory to agents. Agent UID10001 cannot launch it.
 | 9–12 | Held Git, worker, Node and validator files in that runtime, respectively |
 
 The capsule is **trusted launcher data, not proof produced by this source**. It
-must have F_SEAL_WRITE/SHRINK/GROW/SEAL, magic OGC1/version1 and network-order fields:
+must have F_SEAL_WRITE/SHRINK/GROW/SEAL, magic OGC2/version2 and network-order fields:
 
 | Offset | Bytes | Meaning |
 | --- | --- | --- |
-| 0 | 8 | OGC1 then uint32 version1 |
+| 0 | 8 | OGC2 then uint32 version2 |
 | 8 | 192 | Six 32-byte nonzero bindings: nonce, intent, artifact, policy, capability, context |
 | 200 | 160 | SHA256 Git/worker/Node/validator/runtime inventory |
 | 360 | 72 | Three dev/inode/mount-ID triples: storage, cgroup, runtime |
@@ -52,9 +52,11 @@ symlinks), containing /usr/bin/git, /usr/bin/node,
 Git config reads. It contains no host /proc, secrets, journal, other jobs or socket.
 The supervisor maps real host /dev/null to broker standard FDs before pivoting.
 The native runtime-inventory hash starts with ASCII
-`offline-git-runtime/v1\n`, then recursively sorted unsigned basename bytes:
-uint64 length, name bytes, D for directories with recursive entries, or F,
-uint64 file length and SHA256 file bytes. Maximum4096 entries/depth16/512MiB
+`offline-git-runtime/v2\n`, then the unambiguous v2 tree grammar: `[` + uint64 child count + sorted entries
++ `]`. Each entry is uint64 basename-byte length + unsigned basename bytes +
+`D` followed by a complete recursive tree, or `F` + uint64 file length + SHA256
+file bytes. Every directory, including the root and empty directories, has its
+own count and end marker. All uint64 values use network order. Maximum4096 entries/depth16/512MiB
 aggregate, any file256MiB. The build manifest records ELF loader/library hashes;
 it is not itself a runtime inventory or qualified installation manifest.
 
@@ -172,7 +174,9 @@ stale locks and staging block. Operator resolution requires separate authorizati
 Native openat2 BENEATH/NO_SYMLINKS/NO_MAGICLINKS/NO_XDEV plus statx mount-ID and
 dev/inode checks bind files to held directories. Nonblocking opens avoid FIFO
 hangs before type checks. Input is regular0600/nlink1, copied into an exclusive
-host-owned file with streaming SHA256, source pre/post stat, fsync/full readback.
+host-owned file with streaming SHA256, source pre/post stat, fsync/full destination readback and a second content hash
+from the held source FD, bracketed by the original identity. Same-size source
+mutation is rejected even when timestamp metadata is indistinguishable.
 Only that held copy is used; worker sees it via read-only bind and readonly FD.
 Worker can write only session/work, with no seal/control/candidate access.
 
@@ -231,3 +235,65 @@ Process-kill tests alone are not power-loss proof. Changed closure/kernel/UID/mo
 invalidates affected qualification. Initial test-driver facility qualification
 does not qualify an absent production validator. AGE28 and operational use remain
 blocked until the appropriate independent gates pass.
+
+## R2 correction contract and source integration
+
+R2 corrects the five findings at failed-review head
+35d92bb693443bd1d731557c09104fe5a7bcadea. OGC2/version2 admission replaces OGC1;
+old capsules are rejected. Both runtime and custody inventories use the explicit
+v2 directory grammar above, under independent domains
+`offline-git-runtime/v2\n` and `offline-git-custody/v2\n` (the latter
+also prefixes all192 binding bytes). All old inventory/capability/qualification
+hashes are invalidated, with no v1 compatibility fallback. OGW1 wire framing
+itself stays version1; these inventory/capsule versions are distinct protocols.
+
+Independent negative goldens for a/b containing byte x versus empty a/ plus
+sibling b containing x:
+
+| Tree | Raw v2 tree SHA256 | Runtime-domain SHA256 |
+| --- | --- | --- |
+| nested | c20ef1a80c71b6fe5b18cb517755317017f444f1ef67638f0f4dbe8d8c3088b5 | de31271d8e0b8878e4babea43c45c1e02550c6d1d0198b4272ce98e6b0dbf033 |
+| sibling | fb75ef870ad78abaf00a8501cf0a90304a3560b5070ff420d363f76ff8d529e0 | 7ec9869cdec98d828c6b78326ccdef8a74d5ecc604a9a6d5ca4d6fe2125a05e1 |
+
+The JS golden independently constructs literal bytes. Native fixtures call BOTH
+production runtime closure and custody inventory code against actual disposable
+trees and compare hardcoded hashes, including custody domain/bindings. Coarse
+source metadata is masked only by a compile-time fixture seam; changed source
+bytes must still reject by rehash. There is no production metadata masking.
+
+The guardian now retains a controller pidfd and uses pidfd_send_signal, never a
+numeric kill after reap. Already-reaped controllers are never signaled. JS/native
+state now permits SETTLE only at stage4 and ADOPT only at stage5; adoption is
+terminal, including SETTLE-after-ADOPT/repeated-SETTLE/repeated-ADOPT denial.
+
+The existing two C fixtures now call the actual production dispatch_session,
+execute, guard_controller and handoff_adopt functions. Their shared extraction
+preserves root/qualification admission in the production entry; none of those
+functions is a new external launcher/API. Fixture-only compile constants relocate
+/work and /empty into a disposable CWD and use the test owner's UID. Those
+constants cannot override production builds, and no operational test-mode flag
+exists. The offline production build never defines OGW_TEST.
+
+Source coverage present (execution requires a compiler):
+
+- A real self-contained SHA1 bundle from the Node fixture goes through production
+  INIT/index-pack/verify-pack/fsck/object/tree protocol stages and real held-FD Git
+  execution. The fixture verifies original raw commit/OID after import.
+- Actual broker/validator-peer processes cover valid settlement, replay/cross-binding
+  rejection, validator EOF/death and broker kill/EOF without a success response.
+- Actual guardian/pidfd paths cover normal/nonzero controller exit and loss of the
+  outer lifeline. Regular files explicitly model cgroup identity/populated/kill
+  observations; these observations are SYNTHETIC, not actual cgroup enforcement.
+- The production adoption handoff, not a reimplemented transaction, runs in a
+  disposable child: successful receipt plus all eight fsync positions with EIO,
+  exit before fsync, and exit after fsync (24 interrupted variants). Tests require
+  no successful final acknowledgement, retained evidence/stage or destination,
+  and no overwrite/replay success for a visible destination. These are process
+  crash/source tests, not simulated power-loss or storage durability proof.
+
+These tests do not bypass or qualify root capsule admission, namespaces/seccomp,
+actual kernel resource controllers, the separately installed lifetime owner,
+guardian death under that owner, or intended-host AGE30 acceptance. Those paths
+still need the separately authorized compiler-equipped/disposable kernel fixture;
+unavailable native checks remain failures. Neither source fixture labels nor a
+future passing compiler run can be reported as AGE30 PASS.

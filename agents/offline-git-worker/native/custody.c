@@ -40,7 +40,14 @@ bool ogw_copy_seal(int source,int destination,const uint8_t digest[32]){
  struct stat a,b,d;if(fstat(source,&a)||fstat(destination,&d)||!S_ISREG(a.st_mode)||a.st_nlink!=1||a.st_size<1||(uint64_t)a.st_size>OGW_BUNDLE||!S_ISREG(d.st_mode)||d.st_nlink!=1||d.st_size!=0||a.st_dev!=d.st_dev||a.st_ino==d.st_ino)return false;
  uint8_t bytes[65536],got[32];uint64_t at=0;ogw_sha256 h;ogw_hash_init(&h);
  while(at<(uint64_t)a.st_size){size_t want=sizeof(bytes);if((uint64_t)want>(uint64_t)a.st_size-at)want=(size_t)((uint64_t)a.st_size-at);ssize_t n=pread(source,bytes,want,(off_t)at);if(n<0&&errno==EINTR)continue;if(n<=0||!ogw_write_all(destination,bytes,(size_t)n))return false;ogw_hash_update(&h,bytes,(size_t)n);at+=(uint64_t)n;}
- ogw_hash_final(&h,got);if(memcmp(got,digest,32)||fstat(source,&b)||!ogw_same(&a,&b)||fsync(destination)||!ogw_hash_fd(destination,OGW_BUNDLE,got)||memcmp(got,digest,32))return false;return true;
+ ogw_hash_final(&h,got);
+ if(memcmp(got,digest,32)||fstat(source,&b)||!ogw_same(&a,&b)||fsync(destination))return false;
+ // Metadata can be indistinguishable after a same-size mutation. Rehash the
+ // held SOURCE after copying, bracketed by the original identity, as well as
+ // rereading the sealed destination. Any mismatch remains UNKNOWN.
+ if(!ogw_hash_fd(source,OGW_BUNDLE,got)||memcmp(got,digest,32)||fstat(source,&b)||!ogw_same(&a,&b))return false;
+ if(!ogw_hash_fd(destination,OGW_BUNDLE,got)||memcmp(got,digest,32)||fstat(source,&b)||!ogw_same(&a,&b))return false;
+ return true;
 }
 bool ogw_hex_name(const char *name,size_t n){if(strlen(name)!=n)return false;for(size_t i=0;i<n;i++)if(!((name[i]>='0'&&name[i]<='9')||(name[i]>='a'&&name[i]<='f')))return false;return true;}
 static int order(const struct dirent **a,const struct dirent **b){return strcmp((*a)->d_name,(*b)->d_name);}
@@ -50,6 +57,8 @@ bool ogw_sync_tree(int dir,dev_t device,unsigned depth,unsigned *count,uint64_t 
  // directory is no longer worker-writable; host identity is checked again below.
  struct dirent **names=NULL;int total=scandirat(dir,".",&names,NULL,order);if(total<0)return false;
  bool ok=(unsigned)total<=OGW_INODES;uint64_t mount;if(!ogw_mount_id(dir,&mount))ok=false;
+ uint64_t children=0;for(int i=0;i<total;i++)if(strcmp(names[i]->d_name,".")&&strcmp(names[i]->d_name,".."))children++;
+ uint8_t child_count[8];ogw_put(child_count,children,8);ogw_hash_update(inventory,"[",1);ogw_hash_update(inventory,child_count,8);
  for(int i=0;i<total;i++){const char *name=names[i]->d_name;if(ok&&strcmp(name,".")&&strcmp(name,"..")){
   if(++*count>OGW_INODES||strlen(name)>255U)ok=false;
   int fd=ok?ogw_open_beneath(dir,name,O_RDONLY):-1;struct stat s;uint64_t m=0;
@@ -61,7 +70,7 @@ bool ogw_sync_tree(int dir,dev_t device,unsigned depth,unsigned *count,uint64_t 
   }
   if(fd>=0&&close(fd))ok=false;
  }free(names[i]);}
- free(names);return ok&&!fstat(dir,&after)&&ogw_same(&anchor,&after)&&fsync(dir)==0;
+ free(names);ogw_hash_update(inventory,"]",1);return ok&&!fstat(dir,&after)&&ogw_same(&anchor,&after)&&fsync(dir)==0;
 }
 bool ogw_adopt(int from,const char *name,int to,const char *destination){
  if(!ogw_hex_name(name,64U)||!ogw_hex_name(destination,64U))return false;

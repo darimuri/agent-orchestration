@@ -24,7 +24,15 @@
 #define OGW_CPU_GUARD 8000000U
 #define OGW_CPU_FINAL 10000000U
 #define OGW_UID 10002U
+#if !defined(OGW_TEST) || !defined(OGW_HOST_UID)
 #define OGW_HOST_UID 1000U
+#endif
+#if !defined(OGW_TEST) || !defined(OGW_WORK_ROOT)
+#define OGW_WORK_ROOT "/work"
+#endif
+#if !defined(OGW_TEST) || !defined(OGW_EMPTY_ROOT)
+#define OGW_EMPTY_ROOT "/empty"
+#endif
 #define OGW_ROOT "/var/lib/github-app-agent-gateway/offline-import-v1"
 #define OGW_VALIDATOR "/validator/entry.mjs"
 #define OGW_GIT "/usr/bin/git"
@@ -62,6 +70,7 @@ static inline bool ogw_step(ogw_state *s,unsigned op){
  if(s->stage<4U&&op==stages[s->stage]){s->stage++;return true;}
  if(s->stage==4U&&(op==OGW_OBJECT_READ||op==OGW_TREE)&&++s->reads<=OGW_READS)return true;
  if(s->stage==4U&&op==OGW_SETTLE){s->stage=5U;return true;}
+ if(s->stage==5U&&op==OGW_ADOPT){s->stage=6U;return true;}
  s->poisoned=true;return false;
 }
 static inline bool ogw_charge(ogw_state *s,size_t out,size_t err){

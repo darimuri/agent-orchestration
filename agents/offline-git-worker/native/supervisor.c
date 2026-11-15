@@ -23,6 +23,7 @@
 #include <time.h>
 
 // Private immutable launcher capsule, not a caller configuration language.
+// OGC2 uses unambiguous v2 inventories; old capsules cannot be reinterpreted.
 // 0 magic/version;8 bindings192;200 Git/worker/Node/validator/closure hashes160;
 // 360 root/cgroup/runtime dev+ino+mount (9*u64);432 CPU/outer-owner proof hashes64.
 #define CAPSULE_SIZE 496U
@@ -37,7 +38,7 @@ static bool kill_group(int dir){int fd=ogw_open_beneath(dir,"cgroup.kill",O_WRON
 static bool identity(int fd,const uint8_t *numbers){struct stat s;uint64_t mount;return !fstat(fd,&s)&&ogw_mount_id(fd,&mount)&&(uint64_t)s.st_dev==ogw_get(numbers,8)&&(uint64_t)s.st_ino==ogw_get(numbers+8,8)&&mount==ogw_get(numbers+16,8);}
 static bool capsule(uint8_t bytes[CAPSULE_SIZE]){
  struct stat s;int seals=fcntl(8,F_GET_SEALS);const int required=F_SEAL_WRITE|F_SEAL_SHRINK|F_SEAL_GROW|F_SEAL_SEAL;
- if(fstat(8,&s)||!S_ISREG(s.st_mode)||s.st_uid!=0||s.st_size!=CAPSULE_SIZE||seals<0||(seals&required)!=required||pread(8,bytes,CAPSULE_SIZE,0)!=CAPSULE_SIZE||memcmp(bytes,"OGC1",4)||ogw_get(bytes+4,4)!=1U)return false;
+ if(fstat(8,&s)||!S_ISREG(s.st_mode)||s.st_uid!=0||s.st_size!=CAPSULE_SIZE||seals<0||(seals&required)!=required||pread(8,bytes,CAPSULE_SIZE,0)!=CAPSULE_SIZE||memcmp(bytes,"OGC2",4)||ogw_get(bytes+4,4)!=2U)return false;
  for(unsigned i=0;i<6U;i++)if(!nonzero(bytes+8U+32U*i,32))return false;
  for(unsigned i=0;i<5U;i++)if(!nonzero(bytes+200U+32U*i,32))return false;
  if(!nonzero(bytes+432,32)||!nonzero(bytes+464,32)||!identity(5,bytes+360)||!identity(4,bytes+384)||!identity(6,bytes+408))return false;
@@ -57,18 +58,20 @@ static bool root_path(void){
  if(fd>=0)(void)close(fd);return ok;
 }
 static int sort_names(const struct dirent **a,const struct dirent **b){return strcmp((*a)->d_name,(*b)->d_name);}
-static bool closure(int dir,unsigned depth,unsigned *count,uint64_t *total,ogw_sha256 *hash){
- if(depth>16U)return false;struct stat anchor;if(fstat(dir,&anchor)||anchor.st_uid!=0||!S_ISDIR(anchor.st_mode)||(anchor.st_mode&0022U))return false;
+static bool closure(int dir,unsigned depth,unsigned *count,uint64_t *total,ogw_sha256 *hash,uid_t owner){
+ if(depth>16U)return false;struct stat anchor;if(fstat(dir,&anchor)||anchor.st_uid!=owner||!S_ISDIR(anchor.st_mode)||(anchor.st_mode&0022U))return false;
  struct dirent **names=NULL;int n=scandirat(dir,".",&names,NULL,sort_names);if(n<0)return false;bool ok=(unsigned)n<=4098U;
+ uint64_t children=0;for(int i=0;i<n;i++)if(strcmp(names[i]->d_name,".")&&strcmp(names[i]->d_name,".."))children++;
+ uint8_t child_count[8];ogw_put(child_count,children,8);ogw_hash_update(hash,"[",1);ogw_hash_update(hash,child_count,8);
  for(int i=0;i<n;i++){const char *name=names[i]->d_name;if(ok&&strcmp(name,".")&&strcmp(name,"..")){
   if(++*count>4096U)ok=false;int fd=ok?ogw_open_beneath(dir,name,O_RDONLY):-1;struct stat s;
-  if(fd<0||fstat(fd,&s)||s.st_uid!=0||(s.st_mode&07022U))ok=false;
+  if(fd<0||fstat(fd,&s)||s.st_uid!=owner||(s.st_mode&07022U))ok=false;
   if(ok){uint8_t len[8];size_t length=strlen(name);ogw_put(len,length,8);ogw_hash_update(hash,len,8);ogw_hash_update(hash,name,length);
-   if(S_ISDIR(s.st_mode)){ogw_hash_update(hash,"D",1);ok=closure(fd,depth+1U,count,total,hash);}
+   if(S_ISDIR(s.st_mode)){ogw_hash_update(hash,"D",1);ok=closure(fd,depth+1U,count,total,hash,owner);}
    else if(S_ISREG(s.st_mode)&&s.st_size>=0&&(uint64_t)s.st_size<=536870912U-*total){uint8_t digest[32];*total+=(uint64_t)s.st_size;ok=ogw_hash_fd(fd,268435456U,digest);ogw_hash_update(hash,"F",1);ogw_put(len,(uint64_t)s.st_size,8);ogw_hash_update(hash,len,8);if(ok)ogw_hash_update(hash,digest,32);}
    else ok=false;
   }if(fd>=0)(void)close(fd);
- }free(names[i]);}free(names);return ok;
+ }free(names[i]);}free(names);ogw_hash_update(hash,"]",1);return ok;
 }
 static bool prerequisites(const uint8_t c[CAPSULE_SIZE]){
  struct ucred peer;socklen_t size=sizeof(peer);int type;socklen_t tn=sizeof(type);
@@ -78,8 +81,8 @@ static bool prerequisites(const uint8_t c[CAPSULE_SIZE]){
  if(fstatfs(4,&fs)||fs.f_type!=CGROUP2_SUPER_MAGIC||populated(4)!=0)return false;
  char domain[32];if(!read_small(4,"cgroup.type",domain,sizeof(domain))||strcmp(domain,"domain\n"))return false;
  if(!named_fd(6,"usr/bin/git",9)||!named_fd(6,"usr/libexec/ogw-worker",10)||!named_fd(6,"usr/bin/node",11)||!named_fd(6,"validator/entry.mjs",12))return false;
- unsigned count=0;uint64_t total=0;uint8_t digest[32];ogw_sha256 h;ogw_hash_init(&h);ogw_hash_update(&h,"offline-git-runtime/v1\n",sizeof("offline-git-runtime/v1\n")-1U);
- if(!closure(6,0,&count,&total,&h))return false;ogw_hash_final(&h,digest);if(memcmp(digest,c+328,32))return false;
+ unsigned count=0;uint64_t total=0;uint8_t digest[32];ogw_sha256 h;ogw_hash_init(&h);ogw_hash_update(&h,"offline-git-runtime/v2\n",sizeof("offline-git-runtime/v2\n")-1U);
+ if(!closure(6,0,&count,&total,&h,0))return false;ogw_hash_final(&h,digest);if(memcmp(digest,c+328,32))return false;
  uint64_t usage;if(!cpu_usage(4,&usage)||usage!=0U)return false;
  return control(4,"cpu.max","20000 100000\n")&&control(4,"cpu.max.burst","0\n")&&control(4,"memory.max","536870912\n")&&control(4,"memory.swap.max","0\n")&&control(4,"memory.oom.group","1\n")&&control(4,"pids.max","8\n");
 }
@@ -118,6 +121,19 @@ static bool normalize(int dir,dev_t device,unsigned depth,unsigned *count){
 }
 static bool evidence(int fd,const uint8_t *c,unsigned phase){uint8_t b[512];memset(b,0,sizeof(b));memcpy(b,c,CAPSULE_SIZE);ogw_put(b+496,phase,8);return pwrite(fd,b,sizeof(b),0)==(ssize_t)sizeof(b)&&fsync(fd)==0;}
 static bool next_request(const uint8_t *c,uint32_t sequence,unsigned op,ogw_frame *out){uint8_t b[OGW_CONTROL+1U];ssize_t n=read(3,b,sizeof(b));return n>0&&ogw_decode(b,(size_t)n,c+8,sequence,out)&&out->op==op;}
+static int handoff_adopt(const uint8_t *c,int stage,int quarantine,int candidates,int controlfd,int reserve,const uint8_t inventory[32],const char *name,dev_t device){
+ ogw_frame request;ogw_sha256 hash;unsigned count;uint64_t bytes;
+ if(!evidence(reserve,c,3U)||!ogw_send(3,c+8,1U,OGW_DATA,inventory,32)||!ogw_send(3,c+8,1U,OGW_END,NULL,0))return 70;
+ if(!next_request(c,2U,OGW_SETTLE,&request)||!ogw_send(3,c+8,2U,OGW_END,NULL,0)||!next_request(c,3U,OGW_ADOPT,&request)||memcmp(request.payload,inventory,32))return 70;
+ char destination[65];hex32(c+40,destination);
+ if(!evidence(reserve,c,4U)||!ogw_adopt(quarantine,name,candidates,destination)||!evidence(reserve,c,5U))return 70;
+ int adopted=ogw_open_beneath(candidates,destination,O_RDONLY|O_DIRECTORY);if(adopted<0)return 70;
+ uint8_t reread[32];ogw_hash_init(&hash);ogw_hash_update(&hash,"offline-git-custody/v2\n",sizeof("offline-git-custody/v2\n")-1U);ogw_hash_update(&hash,c+8,192);count=0;bytes=0;
+ struct stat before,after;if(fstat(stage,&before)||fstat(adopted,&after)||!ogw_same(&before,&after)||!ogw_sync_tree(adopted,device,0,&count,&bytes,&hash))return 70;ogw_hash_final(&hash,reread);if(memcmp(inventory,reread,32))return 70;
+ // First-invocation success only after verified normal lock release durability.
+ if(unlinkat(controlfd,"session.lock",0)||fsync(controlfd)||!ogw_send(3,c+8,3U,OGW_END,NULL,0))return 70;
+ return 0;
+}
 static int controller(const uint8_t *c,uint64_t start){
  struct timeval timeout={.tv_sec=1,.tv_usec=0};if(setsockopt(3,SOL_SOCKET,SO_RCVTIMEO,&timeout,sizeof(timeout))||setsockopt(3,SOL_SOCKET,SO_SNDTIMEO,&timeout,sizeof(timeout)))return 70;
  struct stat root;if(fstat(5,&root))return 70;
@@ -167,34 +183,35 @@ static int controller(const uint8_t *c,uint64_t start){
  int sandbox_dir=ogw_open_beneath(stage,"sandbox",O_RDONLY|O_DIRECTORY);
  if(sandbox_dir<0||fchown(sandbox_dir,OGW_HOST_UID,OGW_HOST_UID)||close(sandbox_dir))return 70;
  unsigned count=0;if(!normalize(work,root.st_dev,0,&count)||fchown(work,OGW_HOST_UID,OGW_HOST_UID)||fchmod(work,0700)||close(work))return 70;
- uint8_t inventory[32];ogw_sha256 hash;ogw_hash_init(&hash);ogw_hash_update(&hash,"offline-git-custody/v1\n",sizeof("offline-git-custody/v1\n")-1U);ogw_hash_update(&hash,c+8,192);count=0;uint64_t bytes=0;
+ uint8_t inventory[32];ogw_sha256 hash;ogw_hash_init(&hash);ogw_hash_update(&hash,"offline-git-custody/v2\n",sizeof("offline-git-custody/v2\n")-1U);ogw_hash_update(&hash,c+8,192);count=0;uint64_t bytes=0;
  if(!ogw_sync_tree(stage,root.st_dev,0,&count,&bytes,&hash))return 70;ogw_hash_final(&hash,inventory);
- if(!evidence(reserve,c,3U)||!ogw_send(3,c+8,1U,OGW_DATA,inventory,32)||!ogw_send(3,c+8,1U,OGW_END,NULL,0))return 70;
- if(!next_request(c,2U,OGW_SETTLE,&request)||!ogw_send(3,c+8,2U,OGW_END,NULL,0)||!next_request(c,3U,OGW_ADOPT,&request)||memcmp(request.payload,inventory,32))return 70;
- char destination[65];hex32(c+40,destination);
- if(!evidence(reserve,c,4U)||!ogw_adopt(quarantine,name,candidates,destination)||!evidence(reserve,c,5U))return 70;
- int adopted=ogw_open_beneath(candidates,destination,O_RDONLY|O_DIRECTORY);if(adopted<0)return 70;
- uint8_t reread[32];ogw_hash_init(&hash);ogw_hash_update(&hash,"offline-git-custody/v1\n",sizeof("offline-git-custody/v1\n")-1U);ogw_hash_update(&hash,c+8,192);count=0;bytes=0;
- struct stat before,after;if(fstat(stage,&before)||fstat(adopted,&after)||!ogw_same(&before,&after)||!ogw_sync_tree(adopted,root.st_dev,0,&count,&bytes,&hash))return 70;ogw_hash_final(&hash,reread);if(memcmp(inventory,reread,32))return 70;
- // First-invocation success only after verified normal lock release durability.
- if(unlinkat(controlfd,"session.lock",0)||fsync(controlfd)||!ogw_send(3,c+8,3U,OGW_END,NULL,0))return 70;
- return 0;
+ return handoff_adopt(c,stage,quarantine,candidates,controlfd,reserve,inventory,name,root.st_dev);
 }
-static int supervise(void){
- uint64_t started=now_ms();uint8_t c[CAPSULE_SIZE];
- if(started==UINT64_MAX||!capsule(c)||!prerequisites(c)||now_ms()-started>=OGW_WORK_MS||prctl(PR_SET_CHILD_SUBREAPER,1L,0L,0L,0L))return 70;
- // This lifetime guardian remains outside the worker cgroup and survives
- // controller death. The separately trusted launcher retains the outer kill FD.
- pid_t controller_pid=fork();if(controller_pid<0)return 70;
- if(controller_pid==0){if(prctl(PR_SET_CHILD_SUBREAPER,1L,0L,0L,0L))_exit(70);_exit(controller(c,started));}
+
+static bool signal_controller(int pidfd,bool reaped){
+ // A held pidfd cannot designate a reused numeric PID. No post-reap signal.
+ if(reaped)return true;
+ return syscall(SYS_pidfd_send_signal,pidfd,SIGKILL,NULL,0U)==0||errno==ESRCH;
+}
+static int guard_controller(pid_t controller_pid,int controller_pidfd,const uint8_t *c,uint64_t started){
  bool killed=false,reaped=false;uint64_t kill_at=0;int status=0;
  for(;;){uint64_t now=now_ms();struct pollfd owner={.fd=7,.events=POLLIN|POLLHUP};int result=poll(&owner,1,10);
   bool lost=result<0||(owner.revents&(POLLIN|POLLHUP|POLLERR|POLLNVAL))!=0||!identity(4,c+384)||now-started>=OGW_OUTER_MS;
   if(!reaped){pid_t r=waitpid(controller_pid,&status,WNOHANG);if(r<0)lost=true;else if(r==controller_pid){reaped=true;if(!WIFEXITED(status)||WEXITSTATUS(status)!=0)lost=true;}}
-  if(lost&&!killed){(void)kill_group(4);(void)kill(controller_pid,SIGKILL);killed=true;kill_at=now;}
+  if(lost&&!killed){(void)kill_group(4);(void)signal_controller(controller_pidfd,reaped);killed=true;kill_at=now;}
   if(reaped&&populated(4)==0){int other;pid_t r;do{r=waitpid(-1,&other,WNOHANG);}while(r>0);if(r<0&&errno==ECHILD)return !killed&&WIFEXITED(status)&&WEXITSTATUS(status)==0?0:70;}
   if(killed&&now-kill_at>=OGW_SETTLE_MS)return 70;
  }
+}
+static int supervise(void){
+ uint64_t started=now_ms();uint8_t c[CAPSULE_SIZE];
+ if(started==UINT64_MAX||!capsule(c)||!prerequisites(c)||now_ms()-started>=OGW_WORK_MS||prctl(PR_SET_CHILD_SUBREAPER,1L,0L,0L,0L))return 70;
+ int pidfd=-1;struct clone_args args;memset(&args,0,sizeof(args));args.flags=CLONE_PIDFD;args.exit_signal=SIGCHLD;args.pidfd=(uint64_t)(uintptr_t)&pidfd;
+ pid_t controller_pid=(pid_t)syscall(SYS_clone3,&args,sizeof(args));if(controller_pid<0)return 70;
+ if(controller_pid==0){if(prctl(PR_SET_CHILD_SUBREAPER,1L,0L,0L,0L))_exit(70);_exit(controller(c,started));}
+ // clone3 acquires the pidfd atomically: unsupported pidfds cannot leave an
+ // unmonitored root controller executing while its guardian returns failure.
+ int result=guard_controller(controller_pid,pidfd,c,started);(void)close(pidfd);return result;
 }
 #ifndef OGW_TEST
 int main(int argc,char **argv){(void)argv;if(argc!=1||getuid()!=0||geteuid()!=0||getgid()!=0||getegid()!=0)return 70;

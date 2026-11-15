@@ -51,17 +51,17 @@ static bool filter(void){
 }
 #undef BLOCK
 static void hex(const uint8_t *in,size_t n,char *out){const char *digits="0123456789abcdef";for(size_t i=0;i<n;i++){out[2U*i]=digits[in[i]>>4];out[2U*i+1U]=digits[in[i]&15U];}out[2U*n]='\0';}
-static const char *const environment[]={"LANG=C","LC_ALL=C","TZ=UTC","PATH=/usr/bin","HOME=/work/home","TMPDIR=/work/tmp",
+static const char *const environment[]={"LANG=C","LC_ALL=C","TZ=UTC","PATH=/usr/bin","HOME=" OGW_WORK_ROOT "/home","TMPDIR=" OGW_WORK_ROOT "/tmp",
  "GIT_CONFIG_NOSYSTEM=1","GIT_CONFIG_SYSTEM=/dev/null","GIT_CONFIG_GLOBAL=/dev/null","GIT_TERMINAL_PROMPT=0",
  "GIT_NO_REPLACE_OBJECTS=1","GIT_NO_LAZY_FETCH=1","GIT_ALLOW_PROTOCOL=","GIT_OPTIONAL_LOCKS=0",NULL};
 
 // argv is compiled, never decoded from any request. Only 20-byte OIDs become hex.
 static bool operation(const ogw_frame *f,char oid[41],char pack[128],char *argv[20],uint64_t *offset,uint64_t *length){
- size_t n=0;argv[n++]=(char *)OGW_GIT;argv[n++]="--no-pager";argv[n++]="--git-dir=/work/repo";
- argv[n++]="-c";argv[n++]="core.hooksPath=/empty";argv[n++]="-c";argv[n++]="gc.auto=0";argv[n++]="-c";argv[n++]="maintenance.auto=false";
+ size_t n=0;argv[n++]=(char *)OGW_GIT;argv[n++]="--no-pager";argv[n++]="--git-dir=" OGW_WORK_ROOT "/repo";
+ argv[n++]="-c";argv[n++]="core.hooksPath=" OGW_EMPTY_ROOT;argv[n++]="-c";argv[n++]="gc.auto=0";argv[n++]="-c";argv[n++]="maintenance.auto=false";
  *offset=0;*length=0;
  switch(f->op){
- case OGW_INIT:argv[n++]="init";argv[n++]="--bare";argv[n++]="--object-format=sha1";argv[n++]="--template=/empty";argv[n++]="--quiet";argv[n++]="/work/repo";break;
+ case OGW_INIT:argv[n++]="init";argv[n++]="--bare";argv[n++]="--object-format=sha1";argv[n++]="--template=" OGW_EMPTY_ROOT;argv[n++]="--quiet";argv[n++]=OGW_WORK_ROOT "/repo";break;
  case OGW_INDEX_PACK:argv[n++]="index-pack";argv[n++]="--stdin";argv[n++]="--strict";argv[n++]="--max-input-size=33554432";*offset=ogw_get(f->payload,8);*length=ogw_get(f->payload+8,8);break;
  case OGW_VERIFY_PACK:argv[n++]="verify-pack";argv[n++]="-v";argv[n++]=pack;break;
  case OGW_FSCK:argv[n++]="fsck";argv[n++]="--strict";argv[n++]="--full";argv[n++]="--no-reflogs";argv[n++]="--no-dangling";break;
@@ -73,7 +73,7 @@ static bool operation(const ogw_frame *f,char oid[41],char pack[128],char *argv[
 static bool single_pack(char pack[128]){
  // Opaque pack spelling is generated from index-pack's strict 40-hex result,
  // never enumerated from a caller-selected path or advertisement.
- return strlen(pack)==strlen("/work/repo/objects/pack/pack-")+44U;
+ return strlen(pack)==strlen(OGW_WORK_ROOT "/repo/objects/pack/pack-")+44U;
 }
 static bool execute(const ogw_frame *f,ogw_state *state,int channel,char pack[128]){
  char oid[41],*argv[20];uint64_t offset,length;if(!operation(f,oid,pack,argv,&offset,&length))return false;
@@ -111,16 +111,25 @@ static bool execute(const ogw_frame *f,ogw_state *state,int channel,char pack[12
  }
  if(!ok)(void)kill(pid,SIGKILL);for(unsigned i=0;i<3U;i++)if(fds[i]>=0)(void)close(fds[i]);int status;pid_t waited;do{waited=waitpid(pid,&status,0);}while(waited<0&&errno==EINTR);
  if(waited!=pid||!WIFEXITED(status)||WEXITSTATUS(status)!=0)return false;
- if(f->op==OGW_INDEX_PACK){if(index_n!=46U||memcmp(index,"pack\t",5)||index[45]!='\n')return false;index[45]='\0';if(!ogw_hex_name(index+5,40U))return false;int n=snprintf(pack,128,"/work/repo/objects/pack/pack-%s.idx",index+5);if(n<1||n>=128)return false;}
+ if(f->op==OGW_INDEX_PACK){if(index_n!=46U||memcmp(index,"pack\t",5)||index[45]!='\n')return false;index[45]='\0';if(!ogw_hex_name(index+5,40U))return false;int n=snprintf(pack,128,OGW_WORK_ROOT "/repo/objects/pack/pack-%s.idx",index+5);if(n<1||n>=128)return false;}
  return ok;
+}
+static bool dispatch_session(int channel,const uint8_t scope[192]){
+ ogw_state state={0};uint32_t sequence=0;bool complete=false;char pack[128]={0};
+ while(++sequence!=0U){uint8_t bytes[OGW_FRAME+1U];ssize_t n=read(channel,bytes,sizeof(bytes));ogw_frame frame;
+  if(n<=0||!ogw_decode(bytes,(size_t)n,scope,sequence,&frame)||!ogw_step(&state,frame.op))break;
+  if(frame.op==OGW_SETTLE){complete=ogw_send(channel,frame.binding,sequence,OGW_END,NULL,0);break;}
+  if(!execute(&frame,&state,channel,pack)||!ogw_send(channel,frame.binding,sequence,OGW_END,NULL,0))break;
+ }
+ return complete;
 }
 static int worker(void){
  // Supervisor enters all namespaces, drops UID/caps and installs this fixed
  // descriptor map before exec. It remains the independent timeout authority.
  if(getuid()!=OGW_UID||geteuid()!=OGW_UID||getgid()!=OGW_UID||getegid()!=OGW_UID||getpid()!=1)return 70;
- uint8_t capsule[496];if(pread(4,capsule,sizeof(capsule),0)!=(ssize_t)sizeof(capsule)||memcmp(capsule,"OGC1",4))return 70;
+ uint8_t capsule[496];if(pread(4,capsule,sizeof(capsule),0)!=(ssize_t)sizeof(capsule)||memcmp(capsule,"OGC2",4)||ogw_get(capsule+4,4)!=2U)return 70;
  int channel[2];if(socketpair(AF_UNIX,SOCK_SEQPACKET|SOCK_CLOEXEC,0,channel))return 70;
- if(mkdir("/work/home",0700)||mkdir("/work/tmp",0700))return 70;
+ if(mkdir(OGW_WORK_ROOT "/home",0700)||mkdir(OGW_WORK_ROOT "/tmp",0700))return 70;
  // Both sides inherit the same filter. Broker/validator can only read/write the
  // already connected private socket; SCM_RIGHTS and socket creation are denied.
  if(!filter())return 70;
@@ -132,12 +141,7 @@ static int worker(void){
   if(syscall(SYS_close_range,6U,23U,0U)||syscall(SYS_close_range,25U,UINT_MAX,0U))_exit(127);
   char *const argv[]={(char *)OGW_NODE,"--v8-pool-size=1",(char *)OGW_VALIDATOR,NULL};(void)syscall(SYS_execveat,24,"",argv,environment,AT_EMPTY_PATH);_exit(127);
  }
- (void)close(channel[1]);ogw_state state={0};uint32_t sequence=0;bool complete=false;char pack[128]={0};
- while(++sequence!=0U){uint8_t bytes[OGW_FRAME+1U];ssize_t n=read(channel[0],bytes,sizeof(bytes));ogw_frame frame;
-  if(n<=0||!ogw_decode(bytes,(size_t)n,capsule+8,sequence,&frame)||!ogw_step(&state,frame.op))break;
-  if(frame.op==OGW_SETTLE){complete=ogw_send(channel[0],frame.binding,sequence,OGW_END,NULL,0);break;}
-  if(!execute(&frame,&state,channel[0],pack)||!ogw_send(channel[0],frame.binding,sequence,OGW_END,NULL,0))break;
- }
+ (void)close(channel[1]);bool complete=dispatch_session(channel[0],capsule+8);
  (void)close(channel[0]);if(!complete)(void)kill(validator,SIGKILL);
  int status;pid_t waited;do{waited=waitpid(validator,&status,0);}while(waited<0&&errno==EINTR);
  if(waited!=validator||!complete||!WIFEXITED(status)||WEXITSTATUS(status)!=0)return 70;

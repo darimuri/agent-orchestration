@@ -64,7 +64,7 @@ export function createSessionState() {
   return Object.freeze({
     accept(op) {
       if (dead) denied();
-      if (op === OP.SETTLE && stage >= 4) { stage = 5; return; }
+      if (op === OP.SETTLE && stage === 4) { stage = 5; return; }
       if (op === OP.ADOPT && stage === 5) { stage = 6; return; }
       if (stage < 4 && op === [OP.INIT, OP.INDEX_PACK, OP.VERIFY_PACK, OP.FSCK][stage]) { stage++; return; }
       if (stage === 4 && [OP.OBJECT, OP.TREE].includes(op) && ++reads <= LIMITS.reads) return;
