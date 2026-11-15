@@ -2598,3 +2598,134 @@ These are source and synthetic checks only. They do not establish owner-host
 fixture acceptance for the corrected SHA, Docker/native fidelity or qualification
 PASS. Publish a new Draft and obtain fresh exact-SHA review and owner evidence;
 PR #69 is unchanged and remains Draft.
+
+## AGE #23: admission-only native micro-target profile
+
+`owner-nodev8-prerequisite-measurement/v1` is a separate **admission-only** purpose.
+It exposes no production native launch path. Owner scope decision
+`998e37318fba9994b490b4cb5f057a3ce967c3db4ab036ccd08a5f3b63162208`
+requires a complete candidate to end in `STOP_NATIVE_ACTION_BOUNDARY_UNIMPLEMENTED`
+before Docker create or any native tool/helper spawn. A fixed make target, hashed
+Makefiles and compiler wrappers cannot prevent unlisted descendant execution.
+Enabling B1 needs a separately scoped, independently reviewed enforcement design;
+this source slice is not that design and does not authorize B1 execution.
+
+The existing `owner-synthetic-fixture` purpose retains its resources, environment,
+OCI checks, full-chain empty Docker-config custody, persistent capture and exact
+attach/spool/relay rules. Its limits are not increased by supplying native fields.
+The native purpose cannot construct Docker argv or certify recorder completion.
+No configure, compiler, linker, make, Docker or Node/V8 workload runs as part of
+native admission. No image pull, install, extraction, source mutation, tracing or
+privilege change is performed. Archive/context inputs are hashed, never executed
+or unpacked. R1 remains INCOMPLETE, R2 remains BLOCKED; G0–G4/H1–H9 and existing
+native/dependency/regression/reproducibility gaps remain open.
+
+### Fixed identity and bounded candidate
+
+The runner's `nativePolicy` and recorder's `NATIVE_POLICY` bind the same immutable
+infrastructure base/tree, historical approval source/tree, Node 26.13.1 archive,
+qualification lock, source admission, retained generated-context tar, graph report,
+decision and static-graph-correction hashes from the owner's sanitized B0 packet
+`32618e39bd0c65ce8e638a680c3f76a9e95cad5a57ff70e8c5ea0066066604bb`.
+The exact builder repository is
+`127.0.0.1:5007/age20/approval-builder@sha256:b2ed7cea3b936b4054afd8157944dffc0110ae61988b3644716ddaef5214ed31`,
+config/local image ID is
+`sha256:4088bab6dd858541a6ef1702ef856faf485a8052f06cc997003f14383fd1aa06`,
+and platform is `linux/amd64`. These identity checks do not inspect a live image.
+
+B0 remains bound to
+`f6a2b2cf5781a8a4bbd6ab13c3fd11566c3448c7123cc30ed095fc19f2378e7d`.
+Its 15 order-only prerequisite names and 40 declared mksnapshot outputs are context,
+not executable actions or measured task counts. Unresolved `$(OBJS)` provides no
+link authority. No built .o/.a/.stamp artifacts were supplied by the retained tar.
+The real supplemental action allowlist, exact count, expanded compiler argv and
+per-action helper/context hashes remain unavailable; no real native candidate can
+pass admission on the supplied B0 aggregates.
+
+The only described future command vector is the literal argv array:
+
+```json
+["/usr/bin/make", "-C", "/work/node/out", "BUILDTYPE=Release", "V=1", "-j1", "Release/obj.target/v8_base_without_compiler/deps/v8/src/wasm/wasm-disassembler.o"]
+```
+
+It is validated data, not an executable example. Default-all, extra targets/options,
+install, normal Node, configure and mksnapshot link are excluded. Future declared
+ceilings are CPU2/jobs1, RAM8GiB with memory+swap equal RAM (zero additional swap),
+pids256, outer1800s, make1500s, cc/cxx300s, explicitly admitted generator/bootstrap
+link120s and admission120s. Work/output ceilings are 16GiB/2GiB. Native/generator
+actions require an exact precomputed count in 1..256, including descendants and
+attempts. Recorder ceilings remain 20,000 records, 10,000 argv entries/1MiB,
+1MiB per response/16MiB aggregate, 64MiB per stream/128MiB aggregate text.
+These are candidate policy bounds, not measured costs or runtime enforcement:
+there is no native stage to which they can currently grant execution. A future
+implementation must enforce descendant accounting and the shared outer deadline,
+network none, read-only rootfs, UID/GID10001, no added capabilities, no extra swap,
+bounded dedicated ext4 storage and retained failure evidence before B1 can run.
+
+### Admission manifest and STOP evidence
+
+The existing host schema stays `buzz.approval-capture/v1`. Native manifests use
+`purpose: owner-nodev8-prerequisite-measurement/v1`, native resources and a `native`
+object with exactly `identity`, `goal`, `jobs`, `command`, `deadlines`, `taskCount`
+and `evidence`. `identity` must equal the fixed identity fields in `nativePolicy`;
+caller-selected hashes cannot replace those pins. `recorder.native` and
+`recorder.resources` must equal the host declarations. The recorder has the fixed
+roles `cc`, `cxx`, `link` (bootstrap only), `generator`, `workload`; each role has
+exactly a canonical real `/usr/` path and SHA-256, with workload `/usr/bin/make`.
+There is no caller fixture argv, arbitrary role or environment override.
+
+`evidence` requires separate `{path, sha256}` references for `b0`, `allowlist`,
+`lock`, `archive`, `tools`, `context`, `sourceAdmission`, `graphReport`, `decision`
+and `correction`. Host references must be canonical ordinary single-link files
+under the explicit source/control input projections. Raw bytes are hashed with
+mutation/identity guards; they are never silently rewritten. The archive is bounded
+at 512MiB and each other evidence file at 64MiB. `allowlist` has its own separately
+reviewed digest and never replaces B0's digest. `tools` must bind canonical executable
+hashes, exact toolchain string
+`gcc-13.3.0;x86_64-linux-gnu;python-3.12.3;make-4.3` and the same exact 200-package inventory as the hash-pinned lock.
+The input tool/context documents are declarations; no tool is executed or queried.
+
+The supplemental schema is `buzz.native-microtarget-actions/v1`, with exactly
+`schema`, `b0Sha256`, `goal`, `taskCount`, `actions`, `unresolved`, `context`.
+`unresolved` must be empty and count must exactly match the declared action array.
+Each ordered action declares `id`, `role`, `tool`, `argvBase64`, `cwd`, `inputs`,
+`outputs`, `dependencies`, `orderOnly`, `ruleSha256`, `seconds`. Inputs and rule
+hashes must be bound to unique declared context paths. Dependencies must resolve
+to prior actions; every action must belong to the fixed object's transitive closure.
+Canonical `/work/node/` paths, exact byte-safe expanded argv/argv0, role/tool identity,
+unique outputs and stage limits are required. Unknown helpers, missing edges,
+unresolved variables, missing hashes, unsupported roles and mksnapshot outputs
+are rejected. The parser cannot establish that these declarations fully describe
+real make semantics; the unconditional final STOP remains even for complete data.
+
+Native `plan` performs admission reads and prints the STOP report with exit125;
+it never prints runnable create argv. Native `run` only writes exclusive/fsynced
+`native-admission.json` to an already existing, fresh canonical output directory
+and returns125. Missing or mismatched inputs produce `STOP_NATIVE_ADMISSION` with
+a specific blocker; a synthetically complete candidate produces
+`STOP_NATIVE_ACTION_BOUNDARY_UNIMPLEMENTED`. Neither is `CAPTURE_COMPLETE` or
+workload PASS. No container, invocation stream or output object was produced.
+Never reuse an output directory or relabel a partial report as capture success.
+
+The recorder's `native-admission` command likewise prints a STOP report and returns125;
+its record/execute boundary rejects native purposes before tool inspection, record
+creation or spawn. This is a host preflight interface only, not a native container
+entrypoint. No host-to-container native evidence mapping or execution path is
+provided by this admission-only source change.
+
+Synthetic tests use small complete declarations and an explicit digest boundary
+that maps synthetic bytes to historical identity labels; these are not the owner's
+historical raw inputs and never establish B1 admission. Allowlist/tool fixture bytes
+use their actual hashes. Tests require both complete and rejected candidates to
+avoid Docker/spawn, retain STOP evidence, and prevent COMPLETE. Real Python synthetic
+checks remain mandatory; a missing `/usr/bin/python3` is a failure, not a skip or
+proof of recorder behavior. Fresh exact-SHA independent source review is required
+for the Draft PR. Enabling native execution or any expanded B2 closure requires a
+new scope decision and separately reviewed descendant/action-boundary enforcement.
+
+Developer validation in the recreated container is limited by the absence of
+`/usr/bin/python3`: the mandatory recorder behavior test must fail explicitly.
+Do not replace it with a skip or infer Python syntax/behavior from JavaScript
+checks. The full repository suite includes native compiler/linker builds prohibited
+by this job; it is not executed here. Obtain mandatory Python replay and authorized
+full-suite evidence in a suitable environment before any readiness decision.

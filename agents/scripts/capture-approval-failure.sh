@@ -33,6 +33,7 @@ function save(p,value){
   const dir=fs.openSync(path.dirname(p),fs.constants.O_RDONLY|fs.constants.O_DIRECTORY);try{fs.fsyncSync(dir);}finally{fs.closeSync(dir);}
 }
 function validate(m){
+  if(m.purpose===nativePurpose)return validateNative(m);
   need(m.schema===schema&&m.purpose==='owner-synthetic-fixture','fixture schema/authority');
   need(/^[a-z0-9][a-z0-9./:_-]*@sha256:[a-f0-9]{64}$/.test(m.image),'immutable repository manifest');
   need(m.platform==='linux/amd64','admitted fixture platform');
@@ -61,6 +62,118 @@ function validate(m){
   need(m.recorder.limits.stream<=m.resources.stream&&m.recorder.limits.text<=m.resources.text,'stream resource mapping');
   return m;
 }
+// Admission policy only. No native launcher is implemented by this source slice.
+const nativePurpose='owner-nodev8-prerequisite-measurement/v1';
+const nativePolicy={
+  infrastructureBase:'2630a768e0617a6599376d7a92baf663a689d337',infrastructureTree:'d3e1fde2b2599df0e15d99d86a9517ced0120f17',
+  approvalSource:'1312e7a9dec6fac055b61993c145be7f6847e216',approvalTree:'3868efaef2c500a13d2bde30cd645d5aa372ab59',
+  archiveSha256:'a7f6204ff63b6a2cd274d48903285abb86ed53a99070e532d4c2fd787457d9e6',lockSha256:'0dbfd0064f4afbd32ceef751d3d1b75685f8a511cd50d394b21232d02ff29307',
+  sourceAdmissionSha256:'62c5eb0af7c71d8d21838f3442433e8ca16b9350ff6edd5f54332157446bb63d',contextSha256:'a76bd9260f09bfd877a07e28a056e90ee82ce2cac8d5e09a223a71ca95bcd5f0',graphReportSha256:'d5cf17ce74fa607abe246e3b4e88438d081d757b6193a9f6e0274cbfb7c56276',decisionSha256:'34c7e4affc4cf8cc53c95e864f5ae020c69f7c4f2909f81749f4f214701e278c',correctionSha256:'ed137291897adfbd9887191f01fbd1cd5f9eca382f2fc5dd06a0453eed664a8d',
+  repository:'127.0.0.1:5007/age20/approval-builder@sha256:b2ed7cea3b936b4054afd8157944dffc0110ae61988b3644716ddaef5214ed31',
+  b0Sha256:'f6a2b2cf5781a8a4bbd6ab13c3fd11566c3448c7123cc30ed095fc19f2378e7d',
+  manifestDigest:'sha256:b2ed7cea3b936b4054afd8157944dffc0110ae61988b3644716ddaef5214ed31',imageId:'sha256:4088bab6dd858541a6ef1702ef856faf485a8052f06cc997003f14383fd1aa06',platform:'linux/amd64',
+  goal:'Release/obj.target/v8_base_without_compiler/deps/v8/src/wasm/wasm-disassembler.o',jobs:1,actionMaximum:256,
+  deadlines:{workload:1500,cc:300,cxx:300,generator:120,link:120,admission:120},
+  resources:{cpus:2,memory:8589934592,pids:256,seconds:1800,work:17179869184,output:2147483648,stream:67108864,text:134217728}
+};
+function same(a,b){return JSON.stringify(a)===JSON.stringify(b);}
+function keys(value,expected,message){need(value&&typeof value==='object'&&!Array.isArray(value),message+': object required');const missing=expected.filter(k=>!Object.hasOwn(value,k)),extra=Object.keys(value).filter(k=>!expected.includes(k));need(!missing.length&&!extra.length,message+': missing='+missing.join(',')+' unexpected='+extra.join(','));}
+function sha(value){return typeof value==='string'&&/^[a-f0-9]{64}$/.test(value);}
+function nativeCommand(){return ['/usr/bin/make','-C','/work/node/out','BUILDTYPE=Release','V=1','-j1',nativePolicy.goal];}
+function validateNative(m){
+  need(m.schema===schema&&m.purpose===nativePurpose,'native purpose/version');
+  need(m.platform===nativePolicy.platform&&m.imageId===nativePolicy.imageId&&m.image===nativePolicy.repository,'native image/config/platform identity');
+  keys(m.resources,Object.keys(nativePolicy.resources),'native resource keys');
+  for(const [k,ceiling]of Object.entries(nativePolicy.resources))need(Number.isSafeInteger(m.resources[k])&&m.resources[k]>0&&m.resources[k]<=ceiling,'native resource ceiling '+k);
+  need(m.resources.cpus===2&&m.resources.memory===8589934592&&m.resources.pids===256,'native CPU/RAM/pids identity');
+  const n=m.native;
+  keys(n,['identity','goal','jobs','command','deadlines','taskCount','evidence'],'native profile keys');
+  const expected=Object.fromEntries(Object.entries(nativePolicy).filter(([k])=>!['goal','jobs','actionMaximum','deadlines','resources'].includes(k)));
+  keys(n.identity,Object.keys(expected),'native identity keys');for(const [k,v]of Object.entries(expected))need(n.identity[k]===v,'native identity '+k);
+  need(n.goal===nativePolicy.goal&&n.jobs===1&&same(n.command,nativeCommand()),'native fixed single goal/-j1 command');
+  keys(n.deadlines,Object.keys(nativePolicy.deadlines),'native deadline keys');
+  for(const [k,v]of Object.entries(nativePolicy.deadlines))need(Number.isSafeInteger(n.deadlines[k])&&n.deadlines[k]>0&&n.deadlines[k]<=v&&n.deadlines[k]<=m.resources.seconds,'native stage deadline '+k);
+  need(Number.isSafeInteger(n.taskCount)&&n.taskCount>0&&n.taskCount<=nativePolicy.actionMaximum,'native exact action count');
+  keys(n.evidence,['b0','allowlist','lock','archive','tools','context','sourceAdmission','graphReport','decision','correction'],'native evidence keys');
+  for(const [k,ref]of Object.entries(n.evidence)){
+    keys(ref,['path','sha256'],'native evidence reference');
+    need(typeof ref.path==='string'&&path.isAbsolute(ref.path)&&path.resolve(ref.path)===ref.path&&sha(ref.sha256),'native evidence path/hash '+k);
+    need(ref.path.startsWith(m.source+'/')||ref.path.startsWith(m.control+'/'),'native evidence outside source/control projections');
+  }
+  for(const [k,key]of [['b0','b0Sha256'],['lock','lockSha256'],['archive','archiveSha256'],['context','contextSha256'],['sourceAdmission','sourceAdmissionSha256'],['graphReport','graphReportSha256'],['decision','decisionSha256'],['correction','correctionSha256']])need(n.evidence[k].sha256===nativePolicy[key],'native frozen evidence '+k);
+  need(!Object.hasOwn(m,'fixtureArgvBase64'),'native rejects caller fixture argv');
+  // Reuse the unchanged fixture validator for common custody/env/tool shapes;
+  // native budgets/roles are validated above/below, never admitted via fixture.
+  keys(m.recorder.roles,['cc','cxx','link','generator','workload'],'native fixed roles');
+  need(m.recorder.roles.workload.path==='/usr/bin/make','native fixed make executable');
+  for(const tool of Object.values(m.recorder.roles)){keys(tool,['path','sha256'],'native tool keys');need(tool&&/^\/usr\/[A-Za-z0-9_+./-]+$/.test(tool.path)&&path.resolve(tool.path)===tool.path&&sha(tool.sha256),'native canonical pinned tool');}
+  const surrogate=JSON.parse(JSON.stringify(m));surrogate.purpose='owner-synthetic-fixture';surrogate.resources={...caps};surrogate.fixtureArgvBase64=[];
+  surrogate.recorder.purpose=surrogate.purpose;delete surrogate.recorder.roles.generator;surrogate.recorder.limits.seconds=30;
+  validate(surrogate);
+  need(m.recorder.limits.stream<=m.resources.stream&&m.recorder.limits.text<=m.resources.text,'native stream resource mapping');
+  need(m.recorder.limits.records>=n.taskCount+1,'native record/task ceiling');
+  need(m.recorder.purpose===nativePurpose&&m.recorder.limits.seconds===n.deadlines.workload,'native recorder purpose/deadline');
+  need(same(m.recorder.native,n)&&same(m.recorder.resources,m.resources),'host/recorder native policy/resources mismatch');
+  return m;
+}
+function nativeActions(doc,m){
+  const n=m.native;
+  keys(doc,['schema','b0Sha256','goal','taskCount','actions','unresolved','context'],'supplemental action schema');
+  need(doc.schema==='buzz.native-microtarget-actions/v1'&&doc.b0Sha256===nativePolicy.b0Sha256&&doc.goal===nativePolicy.goal,'supplemental B0/goal binding');
+  need(Array.isArray(doc.unresolved)&&doc.unresolved.length===0,'STOP_UNRESOLVED_TRANSITIVE_CLOSURE');
+  need(doc.taskCount===n.taskCount&&Array.isArray(doc.actions)&&doc.actions.length===n.taskCount,'supplemental exact task count');
+  const seen=new Set(),outputs=new Set();
+  need(Array.isArray(doc.context)&&doc.context.length>0&&doc.context.length<=20000&&doc.context.every(f=>typeof f?.path==='string'&&f.path.startsWith('/work/node/')&&path.resolve(f.path)===f.path&&sha(f.sha256)),'supplemental retained context hashes');
+  const workPath=p=>typeof p==='string'&&p.startsWith('/work/node/')&&path.resolve(p)===p&&!p.includes('$');
+  need(new Set(doc.context.map(f=>f.path)).size===doc.context.length,'duplicate context path');
+  const input=item=>{keys(item,['path','sha256'],'action input');need(workPath(item.path)&&sha(item.sha256)&&doc.context.some(f=>f.path===item.path&&f.sha256===item.sha256),'action input/context hash');};
+  for(const a of doc.actions){
+    keys(a,['id','role','tool','argvBase64','cwd','inputs','outputs','dependencies','orderOnly','ruleSha256','seconds'],'supplemental action keys');
+    need(typeof a.id==='string'&&/^[a-z][a-z0-9-]{0,63}$/.test(a.id)&&!seen.has(a.id),'unique action ID');
+    need(['cc','cxx','generator','link'].includes(a.role),'STOP_UNLISTED_ACTION_TYPE');
+    need(same(a.tool,m.recorder.roles[a.role])&&sha(a.ruleSha256)&&doc.context.some(f=>f.sha256===a.ruleSha256),'action pinned tool/rule hash');
+    need(Number.isSafeInteger(a.seconds)&&a.seconds>0&&a.seconds<=n.deadlines[a.role],'action deadline');
+    need(workPath(a.cwd)&&Array.isArray(a.argvBase64)&&a.argvBase64.length>0&&a.argvBase64.length<=10000,'action cwd/argv');
+    let bytes=0;for(const v of a.argvBase64){need(typeof v==='string'&&Buffer.from(v,'base64').toString('base64')===v&&!Buffer.from(v,'base64').includes(0)&&!Buffer.from(v,'base64').includes(36),'action canonical/expanded argv');bytes+=Buffer.from(v,'base64').length+1;}need(bytes<=1048576,'action argv ceiling');
+    need(Buffer.from(a.argvBase64[0],'base64').equals(Buffer.from(a.tool.path)),'action executable argv0');
+    need(Array.isArray(a.inputs)&&a.inputs.length>0&&a.inputs.length<=10000,'action exact inputs');for(const i of a.inputs)input(i);
+    need(Array.isArray(a.outputs)&&a.outputs.length>0&&a.outputs.length<=10000,'action outputs');
+    for(const out of a.outputs){need(workPath(out)&&!outputs.has(out)&&!/(^|\/)mksnapshot(?:$|\.)/.test(out),'no duplicate/mksnapshot output');outputs.add(out);}
+    for(const deps of [a.dependencies,a.orderOnly])need(Array.isArray(deps)&&new Set(deps).size===deps.length&&deps.every(d=>seen.has(d)),'missing/unresolved/transitive edge or cycle');
+    seen.add(a.id);
+  }
+  const terminal=doc.actions.find(a=>a.outputs.includes('/work/node/out/'+nativePolicy.goal));need(terminal,'missing fixed object output');
+  const closure=new Set();function visit(id){if(closure.has(id))return;closure.add(id);const a=doc.actions.find(x=>x.id===id);for(const d of [...a.dependencies,...a.orderOnly])visit(d);}visit(terminal.id);
+  need(closure.size===doc.actions.length,'extraneous action outside fixed goal closure');return doc;
+}
+function nativeInputs(m){
+  const n=m.native,raw={};
+  // Raw archive/source/lock references are never normalized into new evidence.
+  for(const [k,ref]of Object.entries(n.evidence)){
+    const bound=k==='archive'?536870912:67108864;raw[k]=ordinary(ref.path,bound);
+    need(digest(raw[k])===ref.sha256,'native raw evidence hash '+k);
+  }
+  const b0=JSON.parse(raw.b0),lock=JSON.parse(raw.lock),tools=JSON.parse(raw.tools);
+  need(b0.schema==='darimuri.age20.solution2-b0-closure/v1'&&b0.goal===nativePolicy.goal&&b0.classification==='NEW_REPRODUCTION_NOT_RECOVERED_R2'&&b0.status==='B0_READ_ONLY_CLOSURE_COMPLETE_NATIVE_EXECUTION_BLOCKED','native B0 dossier schema/goal/status');
+  need(lock.nodeVersion==='26.13.1'&&lock.nodeSourceSha256===nativePolicy.archiveSha256&&lock.builderImage===m.image&&lock.platform===m.platform&&lock.gccVersion==='13.3.0'&&lock.target?.commit===nativePolicy.approvalSource&&lock.target?.tree===nativePolicy.approvalTree,'native lock tuple');
+  need(lock.packages&&Object.keys(lock.packages).length===200,'native exact package inventory');
+  need(same(Object.entries(tools.packages??{}).sort(),Object.entries(lock.packages).sort())&&tools.gccVersion==='13.3.0'&&tools.toolchain==='gcc-13.3.0;x86_64-linux-gnu;python-3.12.3;make-4.3'&&Array.isArray(tools.records),'native tool/package evidence');
+  for(const tool of Object.values(m.recorder.roles))need(tools.records.some(t=>t.realpath===tool.path&&t.sha256===tool.sha256),'native missing canonical tool hash');
+
+  return nativeActions(JSON.parse(raw.allowlist),m);
+}
+function stopNative(){throw Error('STOP_NATIVE_ACTION_BOUNDARY_UNIMPLEMENTED: fixed make/hashed recipes/wrappers do not confine descendant exec; no native Docker or tool launch');}
+function nativeAdmission(m,persist=false){
+  let status='STOP_NATIVE_ACTION_BOUNDARY_UNIMPLEMENTED',blocker='No reviewed descendant/action-boundary enforcement; no native Docker or tool launch';
+  try{validateNative(m);nativeInputs(m);}catch(e){status='STOP_NATIVE_ADMISSION';blocker=e.message;}
+  const report={schema,purpose:nativePurpose,status,blocker,goal:nativePolicy.goal,b0Sha256:nativePolicy.b0Sha256,actionCount:m.native?.taskCount??null,nativeExecution:'NOT_STARTED',capture:'NOT_STARTED',qualification:'NOT_EVALUATED',R1:'INCOMPLETE',R2:'BLOCKED',internalCollect2LdArgv:'UNOBSERVED',nodeFidelity:'NOT_PROVEN'};
+  if(persist){
+    need(output===m.output&&path.isAbsolute(output)&&fs.realpathSync(output)===output&&fs.lstatSync(output).isDirectory()&&fs.readdirSync(output).length===0,'fresh canonical native admission output required');
+    save(path.join(output,'native-admission.json'),report);
+  }
+  return report;
+}
+
 // Metadata exception is bound to the original immutable tuple, never to a key alone.
 const originalBuilder={manifest:'sha256:b2ed7cea3b936b4054afd8157944dffc0110ae61988b3644716ddaef5214ed31',imageId:'sha256:4088bab6dd858541a6ef1702ef856faf485a8052f06cc997003f14383fd1aa06',platform:'linux/amd64',environment:['PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin','DEBIAN_FRONTEND=noninteractive']};
 function imageEnvironment(m,platformDigest,config,image){
@@ -76,6 +189,7 @@ function imageEnvironment(m,platformDigest,config,image){
   else for(const key of keys)need(['PATH','LANG','LC_ALL','TZ','SOURCE_DATE_EPOCH'].includes(key),'unsafe image environment');
 }
 function recorderCommand(m){
+  if(m.purpose!=='owner-synthetic-fixture')stopNative();
   // No image Env, host Env, shell or PATH-selected launcher reaches Python.
   return ['-i',...Object.entries(m.recorder.environment).map(([k,v])=>k+'='+v),'/usr/bin/python3','-I','-B','-S','/control/recorder.py','fixture','/control/manifest.json'];
 }
@@ -195,6 +309,7 @@ function statRecord(item,limit,single=true){
   need(i.slice(0,5).every(Number.isSafeInteger)&&(i[2]&0o170000)===0o100000&&i[3]>0&&(!single||i[3]===1)&&i[4]===item.size,'recorded ordinary identity');
 }
 function completion(m,attach){
+  if(m.purpose===nativePurpose)stopNative();
   const limits=m.recorder.limits,control=ordinary(path.join(m.control,'manifest.json'),1048576);
   const root=path.join(m.output,'records');need(fs.existsSync(root),'missing records');const ids=fs.readdirSync(root);need(ids.length>0&&ids.length<=limits.records,'record count');
   let workload=null;
@@ -249,6 +364,7 @@ function completion(m,attach){
   need(workload!==null,'missing workload completion');return workload<0?128-workload:workload;
 }
 async function run(m){
+  if(typeof m.purpose==='string'&&m.purpose.startsWith('owner-nodev8-prerequisite-measurement')){nativeAdmission(m,true);return 125;}
   const runDeadline=Date.now()+m.resources.seconds*1000;
   storage(m);need(output===m.output,'explicit output mismatch');
   env.DOCKER_CONFIG=dockerConfig(m.control,m.dockerCustodyRoot);
@@ -283,8 +399,10 @@ async function run(m){
 function wrapper(role){return '#!/bin/sh\nexec /usr/bin/python3 -I -B -S /control/recorder.py record /control/manifest.json '+role+' /control/'+role+' "$@"\n';}
 try{
   need(['plan','run'].includes(mode),'plan|run manifest.json [output]');
-  const m=validate(JSON.parse(ordinary(manifestPath,1048576)));
-  if(mode==='plan')console.log(JSON.stringify({schema,status:'PLAN_ONLY',create:createArgs(m,'approval-capture-PLAN'),wrappers:Object.fromEntries(['cc','cxx','link'].map(r=>[r,wrapper(r)])),limits:caps,instrumentation:'NEW wrapper/process topology',internalCollect2LdArgv:'UNOBSERVED',qualification:'NOT_EVALUATED'},null,2));
+  const parsed=JSON.parse(ordinary(manifestPath,1048576));
+  const m=typeof parsed.purpose==='string'&&parsed.purpose.startsWith('owner-nodev8-prerequisite-measurement')?parsed:validate(parsed);
+  if(mode==='plan'&&typeof m.purpose==='string'&&m.purpose.startsWith('owner-nodev8-prerequisite-measurement')){console.log(JSON.stringify(nativeAdmission(m),null,2));process.exitCode=125;}
+  else if(mode==='plan')console.log(JSON.stringify({schema,status:'PLAN_ONLY',create:createArgs(m,'approval-capture-PLAN'),wrappers:Object.fromEntries(['cc','cxx','link'].map(r=>[r,wrapper(r)])),limits:caps,instrumentation:'NEW wrapper/process topology',internalCollect2LdArgv:'UNOBSERVED',qualification:'NOT_EVALUATED'},null,2));
   else {
     for(const sig of ['SIGTERM','SIGINT','SIGHUP'])process.on(sig,()=>{hostCancel??=sig;for(const child of activeDocker)child.kill('SIGKILL');});
     process.exitCode=await run(m);
