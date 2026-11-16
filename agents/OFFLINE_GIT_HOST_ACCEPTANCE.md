@@ -373,3 +373,119 @@ Future real Node8PID closure, runtime pinning, owner-death kill/reap, custody/st
 crash and isolation qualification remain separate. Native builds here are mandatory
 source evidence only; unavailable compiler failure must be reported honestly, and
 an owner compiler-equipped report must be attributed separately from local tests/CI.
+
+## Source-only empty-cgroup observer (separate four-file slice)
+
+`tests/offline-git-worker/host-cgroup-observe.c` is a standalone future Linux,
+no-argument observer. It is not installed or connected to the CLI, host entry,
+dossier, capsule, launcher or production build. The existing 19-file inspection
+inventory and all production sources remain unchanged. Its exit is always 2;
+every report and build inventory is UNKNOWN, admission:false, qualified:false,
+assumptionsVerified:false. observationsComplete means only that the finite empty
+configuration sequence finished. It is not host qualification.
+
+Future effects are reserved, not authorized by this document. Real/effective
+UID/GID must all be zero, arguments are refused, inherited descriptors above 2
+are closed and inherited environment authority is cleared. Required openat2,
+statx mount identity and evidence allocation/sync behavior have no fallback.
+Ancestors must be root-owned and not writable by agents, group or world. Named
+and held device/inode/mount identities are compared around effects/readback.
+
+The following parents must ALREADY exist with trusted custody:
+
+- `/sys/fs/cgroup/age30-qualification-age30-8bbc3a9d-r1`: actual cgroup v2,
+  domain, empty, no descendants, cpu/memory/pids available and already enabled.
+- `/var/lib/age30-qualification/evidence`: trusted evidence storage.
+
+The observer exclusively creates evidence directory
+`age30-8bbc3a9d-r1-cgroup-observe-v1` (0700), and only `start.json`,
+`observations.json`, `result.json` (exclusive 0600 regular single-link files).
+Each file is bounded to 16384 bytes; aggregate is at most 65536. All three receive
+16KiB KEEP_SIZE allocation reservations before the start record; observations
+have a reserved closing margin and terminal output has independent capacity.
+Failure to reserve or sync denies further cgroup effects. Each report is written
+at most once. Short writes, absent/partial terminal records, allocation or fsync
+uncertainty remain UNKNOWN, with no durability claim. Complete records include
+phase/error/errno and held identities; errno zero can accompany a semantic refusal.
+
+Only after exclusive evidence reservation and synced start does it create the
+single child `cgroup-observe-v1` beneath the fixed cgroup parent. Only that fresh
+empty child receives these literal writes, once, in this order:
+
+| Control | Literal bytes |
+| --- | --- |
+| cpu.max | `20000 100000\n` |
+| cpu.max.burst | `0\n` |
+| memory.max | `536870912\n` |
+| memory.swap.max | `0\n` |
+| memory.oom.group | `1\n` |
+| pids.max | `8\n` |
+
+Here `\n` denotes one newline byte. No parent limits, ownership or
+subtree_control are changed. There is no process insertion, workload, signal,
+kill/freeze/procs/threads write, namespace, mount, runtime or storage image.
+The observer remains outside the empty leaf. Unexpected population stops later
+writes, without attempting removal or killing its occupant.
+
+Reads are limited to parent type/controllers/subtree_control/events/procs;
+child type/events/procs, the six controls and cpu.stat/memory.current/
+memory.events/pids.current; own UID/GID maps, namespace IDs, kernel release and
+architecture. Each fixed read is bounded to 4096 bytes. No broad process, mount,
+account, credential or environment scan occurs. There is no polling or retry;
+the cooperative ten-second deadline only refuses subsequent steps. It is not a
+hard scheduling or lifetime guarantee.
+
+Retained states include: evidence-directory-only; some reserved empty files;
+partial or synced start without child; child created before open/initial reads;
+any prefix of the six controls; readback mismatch, identity change or unexpected
+population after a write; observations or result short write/fsync failure; and
+process interruption at any point. Every created artifact stays in place on
+success, refusal, interruption and uncertainty. No delete, repair, adoption,
+resume, retry or stale-path reuse is provided. Concurrent exclusive attempts can
+win at most once. A second invocation refuses retained paths. Owner remediation
+and eventual cleanup are separate authorized work.
+
+Ordinary-user source verification uses:
+
+```sh
+node --test agents/scripts/offline-git-host-cgroup-observe.test.mjs
+node --test agents/docker/*.test.mjs agents/scripts/*.test.mjs
+```
+
+The new JS test compiles the production observer but NEVER executes it. Only the
+separate test binary and its ASan/UBSan variant execute, as an ordinary user, in
+exclusive `/tmp/age30-cgroup-source-*` fixtures. Root/cgroup identities and control
+semantics are simulated; real openat2 and ordinary-file exclusivity are exercised.
+The independent golden trace checks the six literals and effect order. Fixtures
+cover prerequisite/path/custody/mount/controller/domain/population errors,
+unsupported primitives, read/evidence bound and +1, short IO, each counted
+creation/read/write/report/allocation/fsync fault, interruption after start,
+retention, no reuse and concurrent attempts. Production invocation guard logic
+is tested through a pure predicate, never by launching its privileged entry.
+Missing fixed compiler, linker, readelf or sanitizer support is FAILURE, never skip.
+
+All build output is retained, including failures. Separate `build.json` binds
+base, exact source head/tree, working diff digest, the four source SHA256 values,
+compiler/linker versions, compiler/linker/readelf/Node digests rechecked after the
+fixture run, full fixed flags/commands, artifact digests and simulated
+trace digest. Command logs retain statuses and diagnostics. Its complete field
+means source fixtures only. For review, use clean exact published head, compare
+all four hashes and the inventory against the independently reviewed commit,
+then independently hash retained build.json/logs/binaries. This inventory does
+not extend the frozen probe inventory or certify a runnable/trusted installation.
+
+Before any future root effect: independent exact-source review, human merge,
+ordinary-user build verification, trusted reviewed executable custody and explicit
+owner authorization naming source/build/binary digests, intended disposable host,
+fixed effects and retained paths are required. Missing delegated topology or
+trusted artifacts is a RUN BLOCKER, not permission to provision, elevate, install,
+change ancestors or select another writable path. No root command is supplied.
+
+Even genuine empty-leaf readback cannot prove quota/slack/carry/parallelism bounds,
+finite runnable lifetime under controller/owner starvation/death, escape/migration
+prevention, aggregate trusted CPU or uncertainty reserve. All seven dossier
+obligations remain unproved. Namespace/seccomp/network/secrets, memory/PID
+stress enforcement, real Node8PID/Git closure, storage/custody/crash behavior,
+launcher and production mount identity remain unqualified. AGE28 remains blocked.
+A later admitting mechanism needs independent preventive CPU/lifetime justification
+and separately reviewed source authority; this observation cannot auto-promote it.
