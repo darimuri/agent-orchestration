@@ -5,6 +5,7 @@ import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { assessQualificationDossier, decodeQualificationDossier, dossierTemplate, PRODUCTION, PREPARATION_FILES, PROBE, POLICY } from '../offline-git-worker/qualification-dossier.mjs';
 import { exact } from '../offline-git-worker/protocol.mjs';
 import { buildOfflineGitWorker, offlineGitFlags } from './build-offline-git-worker.mjs';
 export const BASE = '8bbc3a9d052d428e67eebd3b7cf56c43ffe4490a';
@@ -13,7 +14,7 @@ const root = fileURLToPath(new URL('../../', import.meta.url));
 const fixture = path.join(root, 'agents/tests/offline-git-worker');
 const env = Object.freeze({ LANG: 'C', LC_ALL: 'C', TZ: 'UTC', SOURCE_DATE_EPOCH: '0', GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null' });
 const SOURCES = Object.freeze([
-  'agents/offline-git-worker/protocol.mjs','agents/offline-git-worker/client.mjs',
+  'agents/offline-git-worker/protocol.mjs','agents/offline-git-worker/client.mjs','agents/offline-git-worker/qualification-dossier.mjs',
   ...['protocol.h','custody.h','custody.c','supervisor.c','worker.c'].map(n => 'agents/offline-git-worker/native/' + n),
   'agents/scripts/build-offline-git-worker.mjs','agents/scripts/offline-git-worker.test.mjs',
   'agents/tests/offline-git-worker/native.test.c','agents/tests/offline-git-worker/worker.test.c','agents/OFFLINE_GIT_WORKER.md',
@@ -65,7 +66,7 @@ export function inspect() {
   try { source = { head: run('/usr/bin/git', ['rev-parse','HEAD']), tree: run('/usr/bin/git',['rev-parse','HEAD^{tree}']),
     clean: run('/usr/bin/git',['status','--porcelain','--untracked-files=all']) === '',
     basePresent: run('/usr/bin/git',['rev-parse', BASE + '^{tree}']) === BASE_TREE }; } catch { source = { status: 'UNKNOWN' }; }
-  return { ...refusal(), type: 'age30.nonadmitting-inspection', observationScope: 'current-process-container-or-host-unqualified',
+  const result = { ...refusal(), type: 'age30.nonadmitting-inspection', observationScope: 'current-process-container-or-host-unqualified',
     sourceFiles: Object.fromEntries(SOURCES.map(n => { try { return [n,artifact(path.join(root,n))]; } catch { return [n,{status:'UNKNOWN'}]; } })),
     kernel: os.release(), arch: process.arch, uid: process.getuid(), source, tools,
     uidMap: observation('/proc/self/uid_map'), gidMap: observation('/proc/self/gid_map'),
@@ -75,10 +76,27 @@ export function inspect() {
     })),
     // Existence does not establish effective delegation, seccomp, ext4 or UID authority.
     support: { delegation: 'UNKNOWN', seccompEnforcement: 'UNKNOWN', ext4Durability: 'UNKNOWN', uidAuthority: 'UNKNOWN' } };
+  const digestObservation = value => typeof value?.observed === 'string' ? digest(value.observed) : null;
+  const fileInventory = paths => paths.map(path => ({path,sha256:result.sourceFiles[path]?.sha256 ?? null}));
+  result.dossierContext = {
+    production:{commit:source.basePresent ? BASE : null,tree:source.basePresent ? BASE_TREE : null,
+      files:fileInventory(PRODUCTION.files.map(f=>f.path))},
+    preparation:{commit:source.head ?? null,tree:source.tree ?? null,clean:source.clean ?? null,files:fileInventory(PREPARATION_FILES)},
+    probe:PROBE, policy:POLICY,
+    host:{scope:'CURRENT_PROCESS_UNQUALIFIED',kernelRelease:result.kernel,arch:['x64','arm64'].includes(result.arch) ? result.arch : null,
+      kernelBuildSha256:null,kernelConfigSha256:null,uidMapSha256:digestObservation(result.uidMap),gidMapSha256:digestObservation(result.gidMap),
+      namespaces:Object.fromEntries(Object.entries(result.namespaces).map(([k,v])=>[k,v === 'UNKNOWN' ? null : v])),
+      cgroupSha256:digestObservation(observation('/proc/self/cgroup'))}
+  };
+  result.probeContract = {identity:PROBE, canObserve:['current source bytes and Git identity','release/architecture','current UID/GID maps','current namespace and cgroup identifiers'],
+    cannotObserve:['intended-host authority','kernel build/config identity','effective quota/slack/carry prevention','finite owner-loss/starvation lifetime','trusted aggregate CPU reserve','escape/migration enforcement'],
+    missingProofInputs:[...GATES], template:dossierTemplate()};
+  return result;
 }
-export function assessDossier(bytes) {
+export function assessDossier(bytes, observation = null) {
   if (!Buffer.isBuffer(bytes) || bytes.length > 16384) fail();
   const d = JSON.parse(bytes.toString('utf8'));
+  if (d?.version === 2) return assessQualificationDossier(bytes,observation);
   exact(d, ['version','source','kernel','arch','quotaUs','periodUs','burstUs','parallelism','quotaSlackUs',
     'maxRunnableUs','terminationBoundUs','trustedCpuUs','uncertaintyUs','lifetimeContractSha256','independentReviewSha256']);
   if (d.version !== 1 || d.source !== BASE || !['x64','arm64'].includes(d.arch) ||
@@ -135,7 +153,11 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
         const timer = setTimeout(() => process.stdin.destroy(Error('age30_unknown')), 2000);
         try {
           for await (const b of process.stdin) { size += b.length; if (size > 16384) { process.stdin.destroy(); fail(); } chunks.push(b); }
-          result = assessDossier(Buffer.concat(chunks));
+          const input = Buffer.concat(chunks);
+          if (JSON.parse(input.toString('utf8'))?.version === 2) {
+            decodeQualificationDossier(input); // reject malformed v2 before any inspection
+            result = assessDossier(input,inspect().dossierContext);
+          } else result = assessDossier(input);
         } finally { clearTimeout(timer); }
         break;
       }

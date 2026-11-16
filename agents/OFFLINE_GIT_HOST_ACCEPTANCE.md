@@ -1,9 +1,11 @@
 # AGE30 source-only host acceptance prerequisite
 
-This six-file slice prepares evidence and **always refuses operational admission**.
+This preparation facility (PR86 plus the four-file v2 dossier update) prepares
+evidence and **always refuses operational admission**.
 It does not qualify a host, implement the privileged fixture factory, install a
 service, or supply an OGC2 capability. AGE28 remains blocked. All twelve merged
-AGE29 files remain byte-for-byte unchanged. Source base is the human-approved
+AGE29 files and the three native/validator host fixtures remain byte-for-byte
+unchanged. The production facility source base is the human-approved
 merge `8bbc3a9d052d428e67eebd3b7cf56c43ffe4490a`, tree
 `8c5c76161e3e2580c463f644bff7f893a47bbb54`.
 
@@ -41,7 +43,8 @@ source-build directories and partial build output are retained.
 
 Inspection records current-process kernel/architecture, current UID/GID maps,
 namespace IDs, controller listing, fixed tool identities/versions, Git HEAD/tree/
-clean state and eighteen exact source file hashes (twelve AGE29 plus six AGE30).
+clean state and nineteen exact source file hashes (twelve AGE29 plus seven
+preparation files, including qualification-dossier.mjs).
 These are unqualified container observations when run in this agent container.
 Controller availability is not delegation; namespace existence is not isolation;
 no ext4 durability/seccomp/UID authority is inferred. No environment, credential,
@@ -93,9 +96,9 @@ The JS tests construct a genuine three-object pack and check it with real Git;
 this does not execute real Node inside the production eight-PID envelope. Runtime
 compatibility under those limits remains a required future gate.
 
-## Conditional CPU dossier feasibility, never admission
+## Legacy v1 conditional CPU dossier feasibility, never admission
 
-The `dossier` command reads at most16KiB JSON (two-second input deadline) from stdin as a nonroot user. It has
+The legacy v1 form of the `dossier` command reads at most16KiB JSON (two-second input deadline) from stdin as a nonroot user. It has
 one exact version1 schema, rejects unsafe/negative numbers and wrong source/config,
 and uses BigInt arithmetic. Fields:
 
@@ -214,3 +217,159 @@ alone establishes PASS. Any changed closure/kernel/config/UID/mount invalidates
 affected qualification. The eventual AGE28 validator requires new closure review.
 Rollback means disable admission and invalidate affected identities while retaining
 evidence, not automatic deletion or fallback to an older worker.
+
+## v2 canonical evidence and context contract
+
+The next source slice starts at preparation merge
+`f41325db78c87545f454212ad16187c7fbff76c8`, tree
+`89832821a4e764192d53bdcc0d4eb9b2ac74d4c3`. This is **not** the production facility
+identity. Production BASE remains AGE29 merge8bbc3a9d/tree8c5c7616 above. Only four
+files change: new `offline-git-worker/qualification-dossier.mjs`, this document,
+and the host acceptance JS/test. No native, production admission, dependency or
+build primitive changes are included. Planner decision `a6z5jmhqz3sa7xobf0cq1fiv`
+and owner handoff `d8ubjmrhaafadmimwng432a2` define this boundary.
+
+The existing `dossier` stdin command accepts legacy v1 unchanged, or canonical v2.
+All results exit2/UNKNOWN with admission:false, qualified:false and
+assumptionsVerified:false. The same16KiB byte limit and two-second stdin deadline
+apply to both. Nothing fetches evidence, follows a supplied path/link, executes a
+caller predicate or emits a capsule. The pure module uses only bounded in-memory
+values, SHA256 and JSON; it launches no process or file IO. Valid v2 CLI input is
+followed by the existing fixed read-only current-process inspection; malformed v2
+is rejected before inspection. `qualify`, run-id and generic command options still
+refuse. The mandatory native build remains a source acceptance test, not a skip.
+
+Canonical encoding is UTF8 without BOM, whitespace or trailing newline. Object
+keys sort by ASCII code unit; arrays retain order. Numbers are nonnegative safe
+integers written in ordinary decimal (no exponent, negative zero, fractions,
+Infinity or aliases). Strings use JSON.stringify's shortest escaping and must
+have well-formed Unicode, <=512 UTF8 bytes. Field names are ASCII identifiers.
+Maximum nesting12 and2048 values; arrays<=32 and objects<=32 fields, further
+restricted by schema. Decoder re-encodes and compares bytes, rejecting duplicate
+keys even when their values agree, alternate escapes, invalid UTF8, truncation or
+trailing data. These restrictions are a local documented canonical format, not a
+claim of implementing a general external canonical-JSON standard.
+
+The literal deterministic all-missing template contains no invented safe numbers:
+
+```json
+{"accounting":{"maxRunnableUs":null,"parallelism":null,"quotaSlackUs":null,"terminationBoundUs":null,"trustedCpuUs":null,"uncertaintyUs":null},"claimed":null,"evidence":[],"expected":null,"version":2}
+```
+
+The code fence above describes the bytes; a newline after the JSON is not part of
+the v2 input. `probe` includes this template plus canObserve/cannotObserve and
+missingProofInputs. It records current source bytes/HEAD/tree, kernel release and
+architecture, bounded current UID/GID maps and current namespace/cgroup identifiers.
+It cannot observe intended-host authority, exact kernel build/config, preventive
+quota/slack/carry behavior, finite starvation/death lifetime, trusted aggregate CPU
+reserve, escape/migration enforcement or durability. Kernel build/config remain
+null. There is no broad /proc, environment, account or unrelated mount enumeration.
+No privileged probe, cgroup write, stress/workload or root factory is added.
+
+Exact top-level keys are version=2, expected, claimed, accounting, evidence.
+`expected` and `claimed` are independently supplied expectations and external
+claims; neither is a trusted observation. Either may be null, meaning missing.
+Each nonnull context has exactly production, preparation, probe, host, policy.
+Each subcontext may be null; nullable leaf values represent unavailable context.
+Unknown keys, source paths, enums, unsafe numbers or malformed digests are denied.
+
+| Context | Exact contents |
+| --- | --- |
+| production | commit/tree40 lowercase hex; twelve path/sha256 records in the fixed PRODUCTION inventory order. The module pins both merge/tree and all twelve source digests. |
+| preparation | separate commit/tree, clean boolean and seven path/sha256 records in PREPARATION_FILES order, including this new module. Never silently replace production BASE with current HEAD. |
+| probe | schema `age30.nonadmitting-inspection`, version2, SHA256 of the literal descriptor `age30.nonadmitting-inspection/v2:current-process-only;no-enforcement-proof` plus LF. Source file hashes separately bind implementation. |
+| host | scope, kernelRelease, kernelBuildSha256, kernelConfigSha256, arch, uidMapSha256, gidMapSha256, namespaces, cgroupSha256. Release<=128 ASCII identifier bytes; arch x64/arm64; namespace keys ipc/mnt/net/pid/user/uts with `<kind>:[decimal-id]` strings. |
+| policy | exact POLICY keys/values below; mismatched fixed limits are contradictions, not negotiable options. |
+
+SHA256 is64 lowercase nonzero hex; null means missing, not zero. File inventory
+paths are compiled identifiers only, not read requests. Namespace and map/cgroup
+hashes identify current-process observations; they do not establish host or mount
+custody authority. Scope is CURRENT_PROCESS_UNQUALIFIED or INTENDED_HOST_CLAIM.
+The observer always emits CURRENT_PROCESS_UNQUALIFIED. Any attempted intended-host
+promotion is CONTRADICTED, including a caller supplying a matching alleged host
+observation to the pure API. Same release/build/config hashes, repeated contexts
+and a clean tree do not authenticate host provenance or freshness.
+
+POLICY binds quotaUs20000/periodUs100000/burstUs0, pids8, wallMs30000/tailMs2000/
+ownerMs40000, guardUs8000000/ceilingUs10000000, memoryBytes536870912/swapBytes0,
+scratchBytes268435456/inodes65536, machineBytes268435456/diagnosticBytes1048576,
+readCount20000/frameCount65536, objectBytes8388608/bundleBytes33554432,
+controlBytes16384/frameBytes65536. It copies the frozen policy identity for reporting;
+it never writes or changes any limit. Values are compared against compiled constants.
+
+`accounting` is null or exactly six nullable integer terms: parallelism,
+quotaSlackUs, maxRunnableUs, terminationBoundUs, trustedCpuUs, uncertaintyUs.
+Known values use the unchanged v1 candidate formula and minima/ranges. Missing
+terms yield arithmeticWithinCeiling:UNKNOWN; values below required minima are
+blockers. Feasible totals and threshold equality never prove a bound. Inclusive
+10,000,000us is arithmeticWithinCeiling:true; +1 is a ceiling contradiction. A
+single microsecond crossing a quota-period boundary rounds to a whole extra period.
+The independent conditional baseline is worker8430000/aggregate9030000us, not a
+kernel measurement. Safe-integer inputs are converted to BigInt before summing or
+multiplying, so extreme aggregates do not silently wrap/round.
+
+`evidence` has at most16 fixed-purpose records, each at most512 canonical UTF8
+bytes, within the total16KiB envelope. Each has exactly:
+
+- obligation: kernelQuotaBound, finiteRunnableLifetime, noEscapeMigration,
+  trustedCpuBound, uncertaintyReserve, intendedHostScope or independentContract.
+- expectedContextSha256: SHA256 of canonical expected context bytes.
+- evidenceSha256: claimed content identity, never authenticated proof.
+- evidenceId:1..256 ASCII letters/digits/underscore/dot/colon/hyphen, no URL or path.
+- provenance: SOURCE_CLAIM, NONROOT_OBSERVATION, OWNER_OBSERVATION or
+  INDEPENDENT_REVIEW_REFERENCE. These are **caller labels**, not verified actors.
+
+Repeated obligation/provenance/evidenceId triples reject; different bounded
+references for the same obligation are allowed. No reference is dereferenced.
+The context hash binds the claim's stated subject; it cannot prove completeness,
+truth, independence, freshness or a reviewer signature. Forged, stale and self-review
+hashes cannot supply authority. `provenanceVerified:false` and `freshness:UNVERIFIED`
+are unconditional, including for fully populated/repeated inputs.
+
+The report separates conditional arithmetic, identityMatches (true/false/UNKNOWN),
+missing paths, explicit blockers and seven obligation rows. Identity comparison
+includes expected vs claimed/current observation plus production/probe/policy pins;
+a missing context is UNKNOWN, mismatch or dirty preparation is a blocker. A stale
+evidence context digest is also a binding contradiction. identityMatches:true
+means matching supplied byte identities only. It is never qualification.
+
+Rows are MISSING when relevant context, arithmetic terms or references are absent;
+CLAIM_ONLY for source/nonroot labels; REQUIRES_INDEPENDENT_REVIEW for owner/review
+references; CONTRADICTED for a binding, fixed-policy or accounting contradiction.
+No row becomes PROVEN. Every accounting term is returned with proven:false. The
+finite handoff result is one of SOURCE_CONTRACT_READY_FOR_REVIEW (packaging only),
+MISSING_PRIVILEGED_OBSERVATION or PREVENTIVE_BOUND_UNSUPPORTED. This creates no
+retry/poll loop or authority to collect privileged evidence. Even completely
+populated feasible forged envelopes end UNKNOWN/nonadmitting.
+
+## Upper-bound assumption review deliverable
+
+The following map states what would need a finite justification. None is established
+by this source PR. “Measure later” cannot replace a preventive argument.
+
+| Candidate term | Actual assumption / present justification |
+| --- | --- |
+| ceil((maxRunnableUs + terminationBoundUs)/100000) quota periods plus1 | Bound every interval the worker can remain runnable, including initial and terminal period phase.40s owner and2s tail are policy, not a scheduler-guaranteed upper bound. No finite arbitrary-starvation/death guarantee is established. |
+| periods *20000 | Exact intended-kernel cgroup quota behavior, hierarchy, replenishment/carry and no migration/escape. Config text or one cpu.stat sample cannot prove it; kernel build/config and actual effective topology remain missing. |
+| parallelism * quotaSlackUs | Kernel-specific per-CPU quota slack/carry and maximum concurrent runnable workers/threads. Eight PIDs are not automatically an eight-CPU scheduling theorem. No supported finite slack bound exists here. |
+| trustedCpuUs | Setup/input/runtime hashing, controller, guardian, outer owner, machine/diagnostic output and settlement CPU outside worker cpu.stat. Those processes lack a proved aggregate preventive mechanism. A chosen positive reserve is only a claim. |
+| uncertaintyUs | Explicit remaining measurement/phase/termination error reserve. No justified finite uncertainty bound is supplied. Never silently zero an unproved term. |
+| noEscapeMigration | Namespaces/seccomp/cgroup custody and independent owner enforcement even on guardian death; missing actual host proof, not established by matching source digests. |
+| independently reviewed contract and host scope | Independent provenance/freshness and exact intended-host/build/UID/namespace identities. Hashes and current-container observations are insufficient. |
+
+The concrete unsupported production assumptions are finite runnable lifetime under
+arbitrary owner/controller/guardian starvation or death, and bounded trusted CPU
+outside worker cpu.stat. Without an independently defensible mechanism for those,
+the next step is a separately scoped production-mechanism review/correction, not a
+launcher, larger budget or more optimistic default. Actual quota/slack/topology
+observations may falsify a proposed argument but cannot prove arbitrary scheduling
+latency bounded. A privileged nonadmitting capability probe, if needed to establish
+an otherwise inaccessible observation, requires its own exact source/effect/limits/
+retention review and separate owner authorization first. This source slice gives
+none. The root refusal stub is not a probe substitute.
+
+All earlier UNKNOWN host gates, retained-evidence rules and AGE28 blockage remain.
+Future real Node8PID closure, runtime pinning, owner-death kill/reap, custody/storage/
+crash and isolation qualification remain separate. Native builds here are mandatory
+source evidence only; unavailable compiler failure must be reported honestly, and
+an owner compiler-equipped report must be attributed separately from local tests/CI.
