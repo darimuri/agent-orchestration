@@ -132,6 +132,27 @@ static void retained(void){
 static void complete(void){
  char path[PATH_MAX],text[REPORT_BOUND+1U];int n=snprintf(path,sizeof(path),"%s/var/lib/age30-qualification/evidence/" RUN_ID "/result.json",fixture);assert(n>0&&(size_t)n<sizeof(path));int fd=open(path,O_RDONLY|O_NOFOLLOW);assert(fd>=0);ssize_t got=read(fd,text,REPORT_BOUND);assert(got>0);text[(size_t)got]=0;assert(strstr(text,"\"status\":\"UNKNOWN\"")&&strstr(text,"\"observationsComplete\":true"));assert(close(fd)==0);
 }
+// Independent oracle for the three memory.max fixtures: inspect the actual
+// retained shape, exact literal effect trace, unchanged/updated CPU value and
+// terminal error phase. A missing regular file is discovered at its open; unsafe
+// directory entry types are rejected by directories() before the control loop.
+static void memory_fault_trace(unsigned kind){
+ const char created[]="mkdir:" RUN_ID "\nmkdir:" LEAF "\n";
+ const char prefix[]="mkdir:" RUN_ID "\nmkdir:" LEAF "\nwrite:cpu.max\nwrite:cpu.max.burst\n";
+ assert(!strcmp(trace,kind==25U?prefix:created));
+ char name[PATH_MAX],bytes[REPORT_BOUND+1U];struct stat st;
+ int n=snprintf(name,sizeof(name),"%s/sys/fs/cgroup/" PARENT "/" LEAF "/memory.max",fixture);assert(n>0&&(size_t)n<sizeof(name));
+ if(kind==25U){errno=0;assert(lstat(name,&st)<0&&errno==ENOENT);}
+ else {assert(lstat(name,&st)==0);assert(kind==26U?S_ISFIFO(st.st_mode):S_ISLNK(st.st_mode));}
+ const char *const paths[]={"sys/fs/cgroup/" PARENT "/" LEAF "/retained-memory.max","sys/fs/cgroup/" PARENT "/" LEAF "/cpu.max","var/lib/age30-qualification/evidence/" RUN_ID "/result.json"};
+ for(unsigned i=0;i<3U;i++){
+  n=snprintf(name,sizeof(name),"%s/%s",fixture,paths[i]);assert(n>0&&(size_t)n<sizeof(name));int fd=open(name,O_RDONLY|O_NOFOLLOW);assert(fd>=0);
+  ssize_t got=read(fd,bytes,REPORT_BOUND);assert(got>0&&(size_t)got<sizeof(bytes));bytes[(size_t)got]=0;assert(close(fd)==0);
+  if(i==0U)assert(!strcmp(bytes,"max\n"));
+  else if(i==1U)assert(!strcmp(bytes,kind==25U?"20000 100000\n":"max 100000\n"));
+  else {assert(strstr(bytes,"\"observationsComplete\":false"));assert(strstr(bytes,kind==25U?"\"phase\":\"memory.max\"":"\"phase\":\"initial_read\""));}
+ }
+}
 int main(void){
  assert(getuid()!=0&&geteuid()!=0);(void)umask(0077);
  assert(eligible(1,true,0,0,0,0));assert(!eligible(2,true,0,0,0,0));assert(!eligible(1,false,0,0,0,0));assert(!eligible(1,true,1,0,0,0));assert(!eligible(1,true,0,1,0,0));assert(!eligible(1,true,0,0,1,0));assert(!eligible(1,true,0,0,0,1));
@@ -143,7 +164,8 @@ int main(void){
  for(unsigned at=1U;at<=boundaries;at++){prepare(0,at);assert(observe()==2);assert(failed);retained();}
  for(unsigned kind=1U;kind<=32U;kind++){if(kind==30U)continue;
   prepare(kind,0);assert(observe()==2);retained();
-  if(kind==19U){assert(writes==6U);complete();}else if(kind==12U||kind==13U||kind==14U||kind==22U)assert(writes==1U);else if(kind>=25U&&kind<=27U)assert(writes==2U);else assert(writes==0U);
+  if(kind==19U){assert(writes==6U);complete();}else if(kind==12U||kind==13U||kind==14U||kind==22U)assert(writes==1U);else if(kind==25U)assert(writes==2U);else assert(writes==0U);
+  if(kind>=25U&&kind<=27U)memory_fault_trace(kind);
  }
  // Abrupt interruption after exclusive start creation preserves all evidence; no retry/adoption.
  prepare(30,0);pid_t interrupted=fork();assert(interrupted>=0);if(interrupted==0){(void)observe();_exit(92);}int interrupted_status;assert(waitpid(interrupted,&interrupted_status,0)==interrupted&&WIFEXITED(interrupted_status)&&WEXITSTATUS(interrupted_status)==91);retained();assert(!exists("sys/fs/cgroup/" PARENT "/" LEAF));scenario=0;assert(observe()==2&&writes==0U&&mkdirs==1U);retained();

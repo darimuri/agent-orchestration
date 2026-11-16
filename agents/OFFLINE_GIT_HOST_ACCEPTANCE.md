@@ -463,6 +463,11 @@ creation/read/write/report/allocation/fsync fault, interruption after start,
 retention, no reuse and concurrent attempts. Production invocation guard logic
 is tested through a pure predicate, never by launching its privileged entry.
 Missing fixed compiler, linker, readelf or sanitizer support is FAILURE, never skip.
+For the memory.max fixtures, a missing regular file permits exactly the literal
+cpu.max and cpu.max.burst writes before its open fails. A FIFO or symlink is
+rejected by directory validation during initial reads, before any control write.
+Separate literal traces, retained path types/original memory value, CPU readback
+and terminal error phases assert this distinction independently of write counts.
 
 All build output is retained, including failures. Separate `build.json` binds
 base, exact source head/tree, working diff digest, the four source SHA256 values,
