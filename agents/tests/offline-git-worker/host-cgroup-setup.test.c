@@ -90,7 +90,18 @@ static ssize_t t_write(int fd,const void *bytes,size_t n){
  return write(fd,bytes,n);
 }
 static int t_mode(int fd,mode_t mode){if(!tick())return -1;assert(mode==0500&&!cg[fd]&&strstr(names[fd],"/bin/cgroup-observe-v1"));if(failed)effects_after_error++;note("mode","0500");installed=true;return fchmod(fd,mode);}
-static int t_sync(int fd){if(!tick())return -1;if(strstr(names[fd],"/inventory.json")){note("sync","inventory");durable=true;}if(scenario==27U&&strstr(names[fd],"/start.json"))_exit(91);return fsync(fd);}
+static int t_sync(int fd){
+ if(!tick())return -1;
+ bool inventory=strstr(names[fd],"/inventory.json")!=NULL;struct stat st;
+ if(inventory)assert(fstat(fd,&st)==0);
+ if(scenario==27U&&strstr(names[fd],"/start.json"))_exit(91);
+ int result=fsync(fd);if(result<0)return result;
+ if(inventory){
+  if(st.st_size==0){assert(!installed&&!durable);note("sync","reserved-inventory");}
+  else{assert(installed&&!durable);note("sync","inventory");durable=true;}
+ }
+ return 0;
+}
 static int t_alloc(int fd){if(!tick())return -1;if(scenario==28U){errno=ENOSPC;return -1;}note("reserve",strrchr(names[fd],'/')+1);return fallocate(fd,FALLOC_FL_KEEP_SIZE,0,REPORT_BOUND);}
 static long t_dents(int fd,void *b,size_t n){if(!tick())return -1;return syscall(SYS_getdents64,fd,b,n);}
 static int t_clock(clockid_t which,struct timespec *t){(void)which;if(!tick())return -1;t->tv_sec=scenario==29U&&event>2U?11:0;t->tv_nsec=0;return 0;}
@@ -117,8 +128,10 @@ int main(void){
  assert(eligible(1,true,true,0,0,0,0));assert(!eligible(2,true,true,0,0,0,0));assert(!eligible(1,false,true,0,0,0,0));assert(!eligible(1,true,false,0,0,0,0));assert(!eligible(1,true,true,1,0,0,0));assert(!eligible(1,true,true,0,1,0,0));assert(!eligible(1,true,true,0,0,1,0));assert(!eligible(1,true,true,0,0,0,1));
  prepare(0,0);assert(setup()==2);unsigned boundaries=event;assert(boundaries>100U);assert(control_writes==1U);char b[REPORT_BOUND+1U];assert(result(b,sizeof(b))&&strstr(b,"\"setupComplete\":true"));retained();
  // Literal oracle independent of production path arrays and effect counts.
- const char golden[]="mkdir:age30-qualification\nmkdir:evidence\nmkdir:bin\nmkdir:setup-v1\ncreate:start.json\nreserve:start.json\ncreate:inventory.json\nreserve:inventory.json\ncreate:result.json\nreserve:result.json\ncreate:cgroup-observe-v1\ncopy:embedded-observer\nmode:0500\nsync:inventory\nmkdir:age30-qualification-age30-8bbc3a9d-r1\ncontrol:+cpu +memory +pids\n";
- assert(!strcmp(trace,golden));FILE *log=fopen("simulated-setup-trace.txt","wx");assert(log&&fputs(trace,log)>=0&&fclose(log)==0);
+ const char golden[]="mkdir:age30-qualification\nmkdir:evidence\nmkdir:bin\nmkdir:setup-v1\ncreate:start.json\nreserve:start.json\ncreate:inventory.json\nreserve:inventory.json\nsync:reserved-inventory\ncreate:result.json\nreserve:result.json\ncreate:cgroup-observe-v1\ncopy:embedded-observer\nmode:0500\nsync:inventory\nmkdir:age30-qualification-age30-8bbc3a9d-r1\ncontrol:+cpu +memory +pids\n";
+ FILE *log=fopen("simulated-setup-trace.txt","wx");assert(log&&fputs(trace,log)>=0&&fclose(log)==0);
+ if(strcmp(trace,golden))fprintf(stderr,"SIMULATED trace mismatch\nACTUAL:\n%sEXPECTED:\n%s",trace,golden);
+ assert(!strcmp(trace,golden));
  event=0;control_writes=0;trace_size=0;trace[0]=0;assert(setup()==2&&control_writes==0U&&trace_size==0U);retained();
  // Terminal-write/sync faults may retain a complete-looking but uncommitted result.
  for(unsigned at=1;at<=boundaries;at++){
