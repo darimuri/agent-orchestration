@@ -75,25 +75,45 @@ static ssize_t t_read(int fd,void *out,size_t n){
  if(p==target&&scenario==16U&&take>1U)take=1;
  memcpy(out,bytes+cursor[fd],take);cursor[fd]+=take;if(p==target)mutated=true;return (ssize_t)take;
 }
+// Like filldir64: write named fields/name/NUL, never record alignment padding.
+static void kernel_record(void *out,unsigned short length,unsigned char type,const char *name){
+ struct dent *d=out;d->ino=1;d->off=0;d->len=length;d->type=type;memcpy(d->name,name,strlen(name)+1U);
+}
 static long t_dents(int fd,void *out,size_t n){
- if(!tick())return -1;reads++;assert(which[fd]==15&&n==VALUE_BOUND);if(cursor[fd]++)return scenario==18U?1:0;note("dents","fixed-parent");
+ if(!tick())return -1;reads++;assert(which[fd]==15&&n==VALUE_BOUND);for(size_t i=0;i<n;i++)assert(((unsigned char *)out)[i]==0U);if(cursor[fd]++)return scenario==18U?1:0;note("dents","fixed-parent");
  if(scenario==19U)return (long)VALUE_BOUND+1L;
- struct dent *d=out;memset(out,0,n);d->ino=1;d->len=(unsigned short)(scenario==34U?4096U:40U);d->type=scenario==17U?DT_DIR:DT_REG;memcpy(d->name,scenario==17U?"unexpected":"cgroup.type",scenario==17U?11U:12U);return scenario==34U?4096:40;
+ kernel_record(out,(unsigned short)(scenario==34U?4096U:32U),scenario==17U?DT_DIR:DT_REG,scenario==17U?"unexpected":"cgroup.type");return scenario==34U?4096:32;
 }
 static ssize_t t_write(int fd,const void *b,size_t n){assert(fd==1&&n<=4096U);emitting=true;writes++;assert(writes<=128U);if(scenario==28U){errno=EPIPE;return -1;}if(scenario==29U){errno=EINTR;return -1;}if(scenario==30U)return (ssize_t)n-1;assert(captured_len+n<=OUTPUT_BOUND);memcpy(captured+captured_len,b,n);captured_len+=n;captured[captured_len]=0;return (ssize_t)n;}
 static void reset(unsigned kind){scenario=kind;open_count=0;event=fail_at=writes=reads=0;failed=emitting=mutated=false;missing=-1;target=5;custom_size=0;trace_len=captured_len=0;trace[0]=captured[0]=0;memset(seen,0,sizeof(seen));memset(read_seen,0,sizeof(read_seen));memset(which,0,sizeof(which));memset(cursor,0,sizeof(cursor));}
 static bool complete(void){return strstr(captured,"\"collectionComplete\":true")!=NULL;}
+// Decode the actual exported parent.entries, independently of production base64().
+static void exported_padding(void){
+ if(!captured_len)return;const char *object=strstr(captured,"\"name\":\"parent.entries\"");assert(object);
+ const char *encoded=strstr(object,"\"base64\":\"");assert(encoded);encoded+=10U;
+ const char alphabet[]="ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";unsigned char decoded[4098];size_t used=0;
+ while(*encoded!='"'){
+  unsigned v=0;for(unsigned j=0;j<4U;j++){const char *digit=encoded[j]=='='?NULL:strchr(alphabet,encoded[j]);assert(encoded[j]=='='||(digit&&encoded[j]));v=(v<<6U)|(digit?(unsigned)(digit-alphabet):0U);}
+  assert(used+3U<=sizeof(decoded));decoded[used++]=(unsigned char)(v>>16U);if(encoded[2]!='=')decoded[used++]=(unsigned char)(v>>8U);if(encoded[3]!='=')decoded[used++]=(unsigned char)v;encoded+=4U;
+ }
+ if(!used)return;assert(used==(scenario==34U?4096U:32U));
+ // Linux x86_64 name offset19; cgroup.type+NUL ends at31, unexpected+NUL at30.
+ for(size_t i=scenario==17U?30U:31U;i<used;i++)assert(decoded[i]==0U);
+}
 int main(void){
  assert(getuid()!=0&&geteuid()!=0);assert(eligible(1,true,0,0,0,0)&&!eligible(2,true,0,0,0,0)&&!eligible(1,false,0,0,0,0)&&!eligible(1,true,1,0,0,0));
- reset(0);assert(collect()==2&&complete());unsigned boundaries=event;assert(boundaries>100U);if(strcmp(trace,golden))fprintf(stderr,"TRACE:\n%sEXPECTED:\n%s",trace,golden);assert(!strcmp(trace,golden));assert(strstr(captured,"/wA=")&&strstr(captured,"\"status\":\"UNKNOWN\"")&&!strstr(captured,"\"qualified\":true"));
+ // Prove the shim preserves caller poison in padding and beyond the record.
+ _Alignas(uint64_t) unsigned char poison[64];memset(poison,0xa5,sizeof(poison));kernel_record(poison,32U,DT_REG,"cgroup.type");
+ for(size_t i=31U;i<sizeof(poison);i++)assert(poison[i]==0xa5U);
+ reset(0);assert(collect()==2&&complete());exported_padding();unsigned boundaries=event;assert(boundaries>100U);if(strcmp(trace,golden))fprintf(stderr,"TRACE:\n%sEXPECTED:\n%s",trace,golden);assert(!strcmp(trace,golden));assert(strstr(captured,"/wA=")&&strstr(captured,"\"status\":\"UNKNOWN\"")&&!strstr(captured,"\"qualified\":true"));
  const unsigned golden_opens[]={0,1,2,3,4,5,5,5,6,6,6,7,7,7,8,9,9,9,10,11,12,13,13,13,14,14,14,15,16,16,16,17,17,17,18,18,18,19,19,19,20,20,20,15,15,0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20};
  assert(open_count==sizeof(golden_opens)/sizeof(golden_opens[0])&&!memcmp(opened,golden_opens,sizeof(golden_opens)));
- for(unsigned at=1;at<=boundaries;at++){reset(0);fail_at=at;assert(collect()==2&&failed&&!complete());}
+ for(unsigned at=1;at<=boundaries;at++){reset(0);fail_at=at;assert(collect()==2&&failed&&!complete());exported_padding();}
  for(int p=1;p<21;p++){reset(0);missing=p;assert(collect()==2&&complete()&&strstr(captured,"\"status\":\"missing\""));}
  for(unsigned kind=1;kind<=34U;kind++){
   reset(kind);if(kind>=20U&&kind<=22U)target=kind==20U?16:kind==21U?19:20;assert(collect()==2);
   if((kind>=20U&&kind<=23U)||kind==17U||kind==34U)assert(complete());else assert(!complete());
-  if(kind>=28U&&kind<=30U)assert(writes==1U);if(kind==17U)assert(strstr(captured,"unexpected_entries"));
+  exported_padding();if(kind>=28U&&kind<=30U)assert(writes==1U);if(kind==17U)assert(strstr(captured,"unexpected_entries"));
  }
  const struct {int path;size_t bound;} limits[]={{5,16384U},{9,262144U},{13,4096U}};
  for(unsigned i=0;i<3U;i++)for(unsigned plus=0;plus<2U;plus++){reset(0);target=limits[i].path;custom_size=limits[i].bound+plus;assert(collect()==2);assert(complete()==(plus==0U));if(plus)assert(strstr(captured,"read_bound"));}

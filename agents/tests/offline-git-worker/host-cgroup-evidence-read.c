@@ -99,7 +99,8 @@ static bool directory(struct state *s,int parent){
  struct object *o=&s->objects[11];o->node=parent;o->status="unread";s->objects_seen=OBJECTS;
  if(parent==-2){o->status="missing";return true;}if(parent<0){o->status="unsafe";return false;}
  o->status="partial";struct identity before;if(!stable_node(s,parent,&before))return false;
- _Alignas(uint64_t) unsigned char buf[VALUE_BOUND],tail[VALUE_BOUND];long got=IO_DENTS(s->nodes[parent].fd,buf,sizeof(buf));
+ // getdents64 leaves record alignment padding untouched; raw export includes it.
+ _Alignas(uint64_t) unsigned char buf[VALUE_BOUND]={0},tail[VALUE_BOUND]={0};long got=IO_DENTS(s->nodes[parent].fd,buf,sizeof(buf));
  if(got<0){int saved=errno;return fail(s,"getdents",saved);}NEED(s,(unsigned long)got<=VALUE_BOUND,"directory_bound");
  o->length=(size_t)got;memcpy(o->bytes,buf,o->length);
  long more=IO_DENTS(s->nodes[parent].fd,tail,sizeof(tail));if(more<0){int saved=errno;return fail(s,"getdents_tail",saved);}NEED(s,more==0,"directory_bound");

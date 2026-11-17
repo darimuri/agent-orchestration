@@ -782,3 +782,17 @@ for any separately authorized setup regeneration, or obtain a revised source
 scope. Earlier setup entry/payload pins do not authorize the reader. Future
 observer-run evidence export needs a separately reviewed extension. All seven
 qualification obligations remain UNKNOWN, AGE30 incomplete and AGE28 blocked.
+
+### Reader directory-padding correction (PR94 follow-up)
+
+Before each bounded getdents64 call, the reader initializes its directory buffers
+to zero. Linux directory records contain alignment padding that the kernel need
+not write; retaining raw returned records must not export previous stack bytes.
+The separate fixture now writes only record fields and name/NUL, preserving
+caller padding. A poisoned-buffer check verifies the shim does not hide this
+boundary, and an independent decoder checks zero padding in actual exported
+parent.entries on successful collection, counted IO failures after the copy,
+terminal-directory failure and maximum-directory-bound cases. The literal fixed
+open/read oracle and all existing bounds/authority remain unchanged. These native
+assertions still require compiler-equipped ordinary-user hardened and sanitizer
+execution; missing tools are failures. No privileged reproduction is authorized.
