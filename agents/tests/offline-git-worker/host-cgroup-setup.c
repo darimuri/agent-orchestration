@@ -115,7 +115,10 @@ static bool no_children(struct state *s,int dir){
 static bool parent_check(struct state *s,int dir,bool enabled){
  char b[READ_BOUND+1U];size_t n;struct statfs fs;
  SYSCHECK(s,IO_FS(s->nodes[dir].fd,&fs),"fstatfs");REQUIRE(s,fs.f_type==CGROUP2_SUPER_MAGIC,"not_cgroup2");
- if(!read_value(s,dir,"cgroup.type",b,&n))return false;REQUIRE(s,!strcmp(b,"domain\n"),"not_domain");
+ // Only the fixed held hierarchy root lacks the non-root type/events interfaces.
+ if(dir!=s->cg){
+  if(!read_value(s,dir,"cgroup.type",b,&n))return false;REQUIRE(s,!strcmp(b,"domain\n"),"not_domain");
+ }
  if(!read_value(s,dir,"cgroup.controllers",b,&n))return false;REQUIRE(s,controllers(b,false),"missing_controllers");
  if(!read_value(s,dir,"cgroup.subtree_control",b,&n))return false;REQUIRE(s,enabled?controllers(b,dir==s->parent):n==0U,"subtree_set");
  if(dir==s->cg)return true; // Root may host processes and unrelated children: never enumerate them.
