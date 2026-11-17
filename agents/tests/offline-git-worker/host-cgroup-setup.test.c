@@ -120,7 +120,10 @@ int main(void){
  const char golden[]="mkdir:age30-qualification\nmkdir:evidence\nmkdir:bin\nmkdir:setup-v1\ncreate:start.json\nreserve:start.json\ncreate:inventory.json\nreserve:inventory.json\ncreate:result.json\nreserve:result.json\ncreate:cgroup-observe-v1\ncopy:embedded-observer\nmode:0500\nsync:inventory\nmkdir:age30-qualification-age30-8bbc3a9d-r1\ncontrol:+cpu +memory +pids\n";
  assert(!strcmp(trace,golden));FILE *log=fopen("simulated-setup-trace.txt","wx");assert(log&&fputs(trace,log)>=0&&fclose(log)==0);
  event=0;control_writes=0;trace_size=0;trace[0]=0;assert(setup()==2&&control_writes==0U&&trace_size==0U);retained();
- for(unsigned at=1;at<=boundaries;at++){prepare(0,at);assert(setup()==2&&failed);retained();// Terminal-write/sync faults may retain a complete-looking but uncommitted result.}
+ // Terminal-write/sync faults may retain a complete-looking but uncommitted result.
+ for(unsigned at=1;at<=boundaries;at++){
+  prepare(0,at);assert(setup()==2&&failed);retained();
+ }
  for(unsigned kind=1;kind<=32U;kind++){if(kind==27U)continue;prepare(kind,0);assert(setup()==2);retained();assert(control_writes<=1U);if(result(b,sizeof(b))&&kind!=26U)assert(strstr(b,"\"setupComplete\":false"));}
  // First syscall error preserved independently of later syscalls/terminal IO.
  struct state error;memset(&error,0,sizeof(error));errno=ESTALE;assert(!fail(&error,"semantic",0));assert(!fail(&error,"later",EIO));assert(error.number==0&&!strcmp(error.error,"semantic"));memset(&error,0,sizeof(error));assert(!fail(&error,"write",ENOSPC)&&!fail(&error,"later",EBADF));assert(error.number==ENOSPC);
