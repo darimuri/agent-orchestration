@@ -681,3 +681,104 @@ identity. Previous payload or owner-entry pins cannot authorize corrected bytes.
 No root command is authorized here. Source review, human merge, intended-host
 preflight, separate owner execution approval and reviewed root evidence export
 remain required. All seven obligations remain UNKNOWN and AGE28 stays blocked.
+
+## Separate setup evidence reader SOURCE slice
+
+The evidence reader is a distinct source-only artifact based on setup evidence
+revision `34b7768a70d64141be52b36d3fbe729b8a02c55c`, tree
+`18ac126ce52b8da030f3f25b7fc6866b4c447f3d`. Its four new files and this runbook
+are the complete five-path allowance. Existing setup, observer and builders are
+unchanged. This source work does not authorize any privileged run.
+
+Ordinary-user source checks and preparation:
+
+```sh
+node --test agents/scripts/offline-git-host-cgroup-evidence.test.mjs
+node --test agents/docker/*.test.mjs agents/scripts/*.test.mjs
+node agents/scripts/offline-git-host-cgroup-evidence.mjs prepare
+bash agents/scripts/test-resource-config.sh
+```
+
+Only fixed `prepare` and `collect` commands exist. Both refuse root and always
+exit2/UNKNOWN, including complete preparation or collection. The production
+reader is compiled and inspected, never executed by tests/preparation. Separate
+compile-time IO fixtures run as ordinary user in hardened and ASan+UBSan forms;
+missing compiler/Python/sanitizer is a mandatory failure, never a skip.
+Preparation requires a clean reviewed descendant and exactly these five changed
+paths. Private exclusive0700 scratch retains invocations, source/tool identities,
+Python import/runtime inventory, ELF, fixture results, reader and inert-entry
+size/SHA256, and false admission flags, including failures. Source/tool/runtime
+identity checks surround compilation. Neither builder CLI nor setup/observer runs.
+
+The reader's only prospective source paths are anchored ancestors and:
+
+- `/var/lib/age30-qualification/setup-v1/{start,inventory,result}.json`
+- `/var/lib/age30-qualification/bin/cgroup-observe-v1`
+- `/sys/fs/cgroup/{cgroup.controllers,cgroup.subtree_control}`
+- `/sys/fs/cgroup/age30-qualification-age30-8bbc3a9d-r1/` followed only by
+  `cgroup.type`, `cgroup.controllers`, `cgroup.subtree_control`, `cgroup.procs`,
+  `cgroup.events`, and one bounded directory observation of that parent itself.
+
+There is no caller path/limit/profile, recursive archive, future observer leaf,
+root type/events/procs/threads read, root enumeration or external command. Fixed
+openat2 no-symlink/no-magiclink/beneath resolution, explicit crossing rules, statx
+mount IDs and held/name custody checks have no fallback. Ancestors are root-owned
+and nonwritable; fixture directories0700, single-link regular receipts0600 and
+observer0500 are required. Ordinary files/directories use O_NOATIME; unsupported
+primitives refuse. Device/mount, identity, size or timestamp instability stops
+subsequent source IO. Missing fixed names are recorded without creating them;
+other fixed names may still be checked. Empty/partial/malformed receipt bytes
+remain raw evidence. Reader code does not interpret receipt claims as authority.
+
+Receipt reads are bounded to16KiB, observer256KiB, cgroup files4096B, each with one
+overflow/terminal check. Fixed-parent directory observation is4096B plus a terminal
+check; descendants are labeled unexpected and never followed. Encoded output is
+capped at512KiB, constructed before output, with at most128 writes of at most4096B.
+A short write, EINTR or EPIPE stops without retry or further source reads; the
+collector retains incomplete bytes. Native stdout must be a writable anonymous
+pipe owned by a nonroot user. This checks inherited pipe provenance, not the
+identity or continued behavior of the consumer process. Owner authorization and
+capture-process provenance remain external evidence. No source writes, fsync,
+permission changes, execution, process creation, service/network contact, root
+output files, cleanup or repair occur.
+
+Format version1 includes status UNKNOWN, admission/qualified/assumptionsVerified
+false, atomic:false, cgroupDurability:RUNTIME_ONLY, collectionComplete and a fixed
+ordered object list with raw base64, observed length and before/after metadata.
+Missing/unsafe/partial/unread objects are distinct; unexpected directory entries
+are observations. A complete collection can contain missing or malformed receipts
+and occupied/threaded/frozen cgroup bytes. It is never setupComplete, host PASS,
+freshness, past fsync/order or durable configuration proof. Mutable cgroup contents
+are not an atomic snapshot even when metadata remains unchanged.
+
+The nonroot `collect` command consumes reader JSON only from stdin. It cannot
+launch a reader, accepts no source/output pathname, and never invokes sudo or
+uploads. It rejects duplicate decoded JSON keys, trailing input, invalid UTF-8,
+noncanonical base64, schema/metadata/flag errors and bounds violations. It retains
+a bounded raw prefix (at most512KiB+one overflow byte) and an explicit incomplete
+manifest on malformed/interrupted/oversize input. On validated input it retains
+decoded bytes with SHA256, receipt syntax observations and collection state in
+fresh exclusive0700 nonroot scratch; files0600, no overwrite/reuse. Reviewer tools
+must independently hash decoded bytes. In particular, compare the installed
+observer to the separately pinned setup artifact size34528 and SHA256
+`959e27df34cbe45068350c5d506cebc2cb33892333754dac09b9c52f24bf39bf`.
+Reader/collector success never performs this setup acceptance automatically.
+
+The reader-specific inert Python entry is separate from setup's entry. Literal
+payload/runtime pins, isolated trusted system Python/import custody, bounded
+regular stdin, metadata continuity and verified sealed memfd precede fixed
+`age30-evidence-read-v1` argv and an empty environment. The expected digest never
+comes from a neighboring manifest. No actual root command or execution request is
+provided here. Independent exact-head review, human merge, exact-merge reader
+preparation and independent new reader/entry/runtime pin review must precede any
+future owner authorization naming intended host, exact source allowlist and
+stdout-only nonroot capture. Setup authorization remains a separate decision.
+
+The existing setup preparer deliberately rejects this expanded checkout: its
+five-path scope is relative to its own older base. Do not relax that gate or
+silently regenerate setup bytes. Keep original exact34b7768 setup artifacts and
+reader/exporter inventories separate; use the original clean pinned projection
+for any separately authorized setup regeneration, or obtain a revised source
+scope. Earlier setup entry/payload pins do not authorize the reader. Future
+observer-run evidence export needs a separately reviewed extension. All seven
+qualification obligations remain UNKNOWN, AGE30 incomplete and AGE28 blocked.
