@@ -645,3 +645,39 @@ future observer evidence require their own reviewed read/export contract; no
 chmod/chown/upload workaround is provided. All seven dossier obligations and
 intended-host isolation/resource/custody/storage/crash qualification remain
 UNKNOWN. AGE28 stays blocked. No deployment or task/job completion follows.
+
+## Root cgroup interface compatibility correction (post PR92)
+
+The fixed held /sys/fs/cgroup node (s->cg) is validated as cgroup2 with
+root custody and repeated held/name device, inode and mount identity checks.
+Linux documents cgroup.type and cgroup.events as non-root interfaces:
+https://www.kernel.org/doc/html/latest/admin-guide/cgroup-v2.html . Setup does
+not open either interface on that exact held root. It still requires cpu,
+memory and pids available and enabled, allowing additional root controllers.
+This distinction does not depend on ENOENT or a caller-selected flag/path.
+Root processes, threads and children are never read or enumerated or modified.
+
+The new direct child still requires exact domain type, empty procs, exact
+unpopulated/unfrozen events and no descendants before enabling and at readback.
+Missing type/events, threaded/malformed type, occupied/frozen state, descendants,
+and unexpected child controller state refuse. No generic missing-file fallback
+was added. Existing effect ordering, the single fixed child control write,
+first-error capture, retained prefixes, no retry and no cleanup remain in force.
+
+The ordinary-user fixture omits both non-root-only files at root and models
+unrelated root occupants/children. It forbids production setup opens of root
+type/events/procs/threads, root writes and root enumeration, while retaining the
+separate bounded-read helper test. Extra enabled root controllers are a positive
+case. Child missing-file and invalid-state cases assert exact phase/error/errno,
+unchanged literal effect prefixes, retention and no later control effects.
+Counted fault positions come from the corrected successful trace; hardened,
+ASan+UBSan, interruption and concurrency coverage remain mandatory. These are
+simulated source tests, never intended-host qualification.
+
+After correction, run the unchanged nonroot prepare on the clean exact reviewed
+head and again after human merge. Independently review the new setup payload and
+owner-entry digest/size, source/tool/runtime inventory and unchanged observer
+identity. Previous payload or owner-entry pins cannot authorize corrected bytes.
+No root command is authorized here. Source review, human merge, intended-host
+preflight, separate owner execution approval and reviewed root evidence export
+remain required. All seven obligations remain UNKNOWN and AGE28 stays blocked.
