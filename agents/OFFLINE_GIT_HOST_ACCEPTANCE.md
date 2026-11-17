@@ -494,3 +494,154 @@ stress enforcement, real Node8PID/Git closure, storage/custody/crash behavior,
 launcher and production mount identity remain unqualified. AGE28 remains blocked.
 A later admitting mechanism needs independent preventive CPU/lifetime justification
 and separately reviewed source authority; this observation cannot auto-promote it.
+
+## Separate setup/custody V1 source slice (not execution authority)
+
+Frozen Planner contract `fp9y3v230ral17pji0jdhifv` and owner readiness
+`nb7hb8j3cpsi6lluds0rqa43` bind this five-file slice to
+`cc71fb96f0be40b681821c5061675285a6f66244`, tree
+`3caab46e535de0cf5ab25774dea8c7a45e1d9817`. Production AGE29, the observer,
+its tests/runner, refusal entry and the existing 19-file probe inventory remain
+byte-identical. This separate source/build inventory does not extend that inventory.
+The observer errno diagnostic follow-up is outside this slice.
+
+Ordinary-user preparation has exactly one command, with no input paths, profiles,
+arguments, environment overrides or limits:
+
+```sh
+node agents/scripts/offline-git-host-cgroup-setup.mjs prepare
+```
+
+It requires a clean reviewed commit descending from the pinned base, with exactly
+the five permitted paths changed. Clean source is a reproducibility condition;
+an independent source review and human merge still authenticate the commit.
+Preparation creates an exclusive mode-0700 `/tmp/age30-cgroup-setup-source-*`
+directory and retains every outcome. It compiles the unchanged observer with the
+existing hardened flags, inspects its x86_64 ELF interpreter/dependencies, and
+embeds its bytes into a private generated header. It then compiles the native
+setup payload. Neither binary is executed. Observer size is at most 256KiB,
+payload at most 1MiB; bounds are not automatically increased. ASan/UBSan is a
+separate mandatory source fixture build; sanitizer bytes are never installed.
+
+`build.json` records base/current commit/tree, all tracked source hashes (including
+all linked/embedded unchanged inputs), tool and Python imported-module identities,
+compiler/linker/readelf/Node versions, full invocations, generated header hash,
+ELF inspection and both binary hashes. Sources, tools, trusted runtime and Python
+module custody are rechecked after compilation. All receipts remain UNKNOWN,
+admission:false, qualified:false, assumptionsVerified:false. complete only means
+source preparation completed. Exit2 never means host setup succeeded.
+
+The only permitted ELF interpreter is `/lib64/ld-linux-x86-64.so.2`; the only
+DT_NEEDED entry is libc.so.6, with no RPATH/RUNPATH. Only the known x86_64 loader
+and libc system aliases resolve into trusted root-owned nonwritable custody;
+canonical paths and hashes are recorded. Unknown closure, writable ancestry,
+unsupported architecture or absent tools refuse. No ldd, downloader, package
+installation, privileged compiler or runtime factory is provided. Trusted system
+`/usr/bin/python3`, its interpreter/stdlib/imported native modules and ancestry
+are prerequisites for the later owner entry. The ordinary-user inventory checks
+these; independently confirm the exact runtime custody before authorization.
+
+`owner-entry.txt` is INERT REVIEW TEXT, not a trusted script and not to be executed
+with sudo. The renderer contains a literal isolated `/usr/bin/python3 -I -c`
+verifier and a placeholder for stdin redirection from one approved regular file.
+After independent exact-source review, human merge, ordinary-user build and
+independent digest verification, a separate owner authorization must name the
+literal setup SHA256/size, runtime pins, host, fixed effects and retained paths.
+The literal digest and the payload are approved separately. A mutable neighboring
+manifest cannot supply the root command's expected pin; changing the pin requires
+new owner authorization. No runnable root command or execution consent is supplied
+by this document or by preparation.
+
+The verifier checks isolation, root identity, fixed loader/libc hashes and trusted
+ancestry, regular stdin at offset zero, pinned size/digest, bounded size+1 reads
+and before/after metadata continuity. It copies only matching bytes to a memfd,
+compares readback, applies WRITE/GROW/SHRINK/SEAL seals, checks sealing/fd-exec
+support, closes unrelated descriptors and execs the FD with fixed no-argument argv
+and an empty environment. No untrusted ELF pathname is reopened, no root temporary
+executable is created and no caller command, shell or user-owned Python module
+is selected. Root Python and stdlib must already be trusted before Python starts;
+this is not a bootstrap route for an untrusted interpreter. Missing primitives
+refuse before filesystem/cgroup setup effects.
+
+The native entry requires Linux x86_64 real/effective UID/GID0, no arguments,
+cleared environment, closed inherited descriptors>=3 and umask0077. It never
+spawns, execs or runs the observer, moves processes, changes UID, mounts,
+creates namespaces, contacts services/network or installs a generic command API.
+Required openat2/statx held/name device/inode/mount checks have no fallback.
+Existing `/`, `/var`, `/var/lib`, `/sys`, `/sys/fs`, `/sys/fs/cgroup` custody must
+be root-owned and nonwritable by group/world, with stable identities.
+
+All new names must initially be absent, including both fixed parents. Any
+preexisting, substituted, special, linked or apparently matching path refuses;
+there is no adoption, chown, overwrite, retry, repair or cleanup path. Setup
+exclusively creates only these filesystem paths:
+
+| Path under `/var/lib/age30-qualification` | Mode / purpose |
+| --- | --- |
+| top directory itself, `evidence`, `bin`, `setup-v1` | 0700; evidence initially empty |
+| `setup-v1/start.json`, `inventory.json`, `result.json` | exclusive 0600 regular single-link reports |
+| `bin/cgroup-observe-v1` | initially exclusive nonexecuting 0600; embedded byte comparison then 0500 |
+
+Each report is at most16KiB, aggregate at most64KiB, with separate16KiB KEEP_SIZE
+reservations including terminal capacity before the durable start. Partial top
+creation may precede journal availability: such retained state is UNKNOWN.
+Embedded observer copy uses bounded full write/readback comparison, exact custody
+checks, final mode0500, file and directory fsync. Its receipt records the embedded
+hash/size and held identities before any cgroup creation. It is never executed.
+
+The only created cgroup is the direct child
+`/sys/fs/cgroup/age30-qualification-age30-8bbc3a9d-r1`. Root must already expose
+and enable cpu/memory/pids. Setup never writes root subtree_control or changes
+ancestor quotas, service units or hierarchy. The owner must separately authorize
+this precise disposable direct-child topology; a host requiring another hierarchy
+needs revised source scope, not an improvised service/delegation.
+
+After durable custody/start, the new parent must be genuine cgroup2, root-owned,
+domain, empty and without descendants, with cpu/memory/pids available. Its ONLY
+control write is one literal `+cpu +memory +pids\n` to its own subtree_control.
+Exact set readback, emptiness and identity checks follow. No observer child/run
+is created, no procs/threads/freeze/kill/disable write occurs, and no occupant is
+moved or killed. Root process/child lists are not enumerated. Cgroup readbacks
+are explicitly RUNTIME_ONLY; fsync of receipts does not make cgroup configuration
+durable. Fixed reads are bounded to4096B, and the finite sequence has no retry or
+poll loop. A cooperative ten-second refusal deadline is not a hard lifetime proof.
+
+First failing syscall captures errno immediately; semantic failures explicitly
+use NO_ERRNO/0. Later reporting does not replace the first error. Subsequent setup
+effects stop; one reserved terminal receipt may be attempted. All created state,
+including partial/unsynced reports, partial observer copies, enabled controller
+prefixes and interrupted directory-only state, remains retained. Missing,
+partial or unsynced result is UNKNOWN even if a partial record looks complete.
+Second invocation refuses; concurrency can reserve the top at most once. Native
+exit2 is used for both refusal and setup completion. Independently inspect valid
+reports/custody before interpreting setupComplete, which never means host PASS.
+
+Source checks, as ordinary user only:
+
+```sh
+node --test agents/scripts/offline-git-host-cgroup-setup.test.mjs
+node --test agents/docker/*.test.mjs agents/scripts/*.test.mjs
+bash agents/scripts/test-resource-config.sh
+```
+
+The separate native fixture replaces IO only at compile time. It uses private
+ordinary-file fixtures and real openat2/exclusivity, SIMULATED root/cgroup
+identities/controls, an independent literal effect oracle, counted IO faults,
+copy/mode/reservation/sync/report/revalidation failures, short/bounded IO,
+substitution/custody/controller/domain/population failures, first-error reporting,
+start interruption, retained state, second invocation and two-process races.
+The Python NONROOT test form handles fixed harmless data and checks digest/bounds,
+metadata mutation, held-file pathname replacement and memfd sealing; it never
+executes setup or the owner root entry. Missing compiler/Python/sanitizer is a
+failed mandatory gate, never skipped or promoted to PASS. Build logs/inventories
+are retained under the private scratch directory. Full-package failures must be
+separated into new failures and exact baseline/environment limitations.
+
+A Draft requires exact-head compiler/owner validation and independent Reviewer
+source PASS before any later Ready request. Human merge and owner setup execution
+remain separate. The installed observer may only be invoked by a further separate
+owner authorization; setup neither grants nor runs it. Root-owned receipts and
+future observer evidence require their own reviewed read/export contract; no
+chmod/chown/upload workaround is provided. All seven dossier obligations and
+intended-host isolation/resource/custody/storage/crash qualification remain
+UNKNOWN. AGE28 stays blocked. No deployment or task/job completion follows.
