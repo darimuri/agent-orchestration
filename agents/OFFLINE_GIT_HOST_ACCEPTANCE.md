@@ -796,3 +796,153 @@ terminal-directory failure and maximum-directory-bound cases. The literal fixed
 open/read oracle and all existing bounds/authority remain unchanged. These native
 assertions still require compiler-equipped ordinary-user hardened and sanitizer
 execution; missing tools are failures. No privileged reproduction is authorized.
+
+### Separate observer-evidence export (source-only, AGE30)
+
+This extension is bound to base `1ad21c92ff5a181f2eede7e74ca03d8dd65291c7`
+and tree `bb32c3339a530d96910e3710129803c042a6b95f`. It adds only
+`host-cgroup-observer-evidence-read.c`, its separate `.test.c`,
+`offline-git-host-cgroup-observer-evidence.mjs` and its `.test.mjs`, plus this
+runbook appendix. Observer/setup, the earlier evidence reader and all earlier
+preparers remain byte-identical. No installation, observer invocation, root-state
+mutation or qualification is authorized by this source extension.
+
+The new reader takes no arguments and requires Linux x86_64 root identity. Its
+fixed ordered26 objects are:
+
+1. `run.start`, `run.observations`, `run.result`: only `start.json`,
+   `observations.json`, `result.json` below
+   `/var/lib/age30-qualification/evidence/age30-8bbc3a9d-r1-cgroup-observe-v1`.
+2. `observer`: `/var/lib/age30-qualification/bin/cgroup-observe-v1`, maximum and
+   expected length34528 bytes, exported unchanged for independent nonroot hashing.
+3. `root.controllers`, `root.subtree_control`: the two named cgroup-root controls.
+4. `parent.type`, `parent.controllers`, `parent.subtree_control`, `parent.procs`,
+   `parent.events`, `parent.entries`: the five named files and directory records
+   of `/sys/fs/cgroup/age30-qualification-age30-8bbc3a9d-r1` itself.
+5. `leaf.type`, `leaf.events`, `leaf.procs`, `leaf.cpu.max`, `leaf.cpu.max.burst`,
+   `leaf.memory.max`, `leaf.memory.swap.max`, `leaf.memory.oom.group`,
+   `leaf.pids.max`, `leaf.cpu.stat`, `leaf.memory.current`, `leaf.memory.events`,
+   `leaf.pids.current`, `leaf.entries`: only those thirteen files and directory
+   records of the parent's fixed `cgroup-observe-v1` leaf itself.
+
+The earlier A/B receipts remain references, not new read targets: raw capture
+SHA256 `8639496a05f648a403d94e52e31da3173a396078ae9a4eda30b66bf90fd95810`,
+collection SHA256 `723999c27b994391bfbcbfaf11289835e376604370d8a0a983593ce911fa998f`,
+Reviewer disposition Kaneo `fdqq2xbblqvud04mf3r65i52`. Actual pre-A output was not
+independently retained; historical invocation/once-only provenance still relies
+on the owner's attestation. This extension neither fills that historical gap nor
+requests a rerun. Keep all original root state and retained artifacts.
+
+Only literal anchored paths are opened. `openat2` refuses symlinks/magiclinks and
+uses beneath/no-cross-device constraints except the explicitly named ancestor
+mount crossings. Held and named `stat`/`statx` identities include mount, device,
+inode, custody, size and modification/change times before/after collection.
+Ordinary file reads use O_NOATIME. Fixed directories require0700; reports0600;
+observer0500; regular files single-link and root-owned without special or
+shared-write bits. cgroup anchors must be cgroup2. Unsafe custody, identity or IO
+stops later source reads; missing names propagate explicit missing observations.
+
+Each report is bounded16KiB; the observer34528B; each control or directory4KiB,
+with an extra read/terminal directory call to detect overflow. The full JSON is
+bounded512KiB. Directory buffers are zeroed before each syscall because kernel
+getdents64 need not initialize alignment padding. Only parent and leaf are
+enumerated: never the cgroup root or any descendant. The parent's exactly named
+leaf is allowed; other descendant/special entries are reported
+`unexpected_entries` without following them. Occupied, threaded or malformed
+control bytes remain raw observations, never authority to signal/kill/repair.
+
+All source reads finish before output begins. Stdout must be a writable
+nonroot-owned anonymous pipe (pipefs), not a root output file/FIFO pathname.
+Output uses at most128 chunks of at most4096B and stops on the first short write,
+EINTR or EPIPE without retry. The reader performs no source writes, chmod/chown,
+fsync, process creation, crypto/tool execution, installation, network or upload.
+Native exit2 always means UNKNOWN, including a complete capture.
+
+The independent nonroot collector accepts only stdin, through:
+
+```sh
+node agents/scripts/offline-git-host-cgroup-observer-evidence.mjs collect
+```
+
+It cannot invoke a reader or observer. It rejects duplicate decoded JSON keys,
+noncanonical base64, invalid UTF-8/schema/metadata/flags and bounds violations.
+It retains at most512KiB plus one overflow byte of raw input in a fresh
+exclusive0700 `/tmp/age30-cgroup-observer-evidence-collect-*` directory with
+exclusive0600 files. Valid captures also retain26 decoded files, raw and decoded
+SHA256, receipt syntax observations and a comparison to the installed observer
+pin. Missing, malformed, truncated, overflowing or interrupted input stays
+UNKNOWN with explicit incomplete state and bounded retained bytes. No overwrite,
+cleanup or retry occurs. `complete` describes collector parsing/retention;
+`collectionComplete` describes fixed source collection. Neither promotes a raw
+receipt's `observationsComplete`, setup/durability claims or qualification flags.
+The observer pin is installation revision `34b7768a70d64141be52b36d3fbe729b8a02c55c`,
+34528B/SHA256 `959e27df34cbe45068350c5d506cebc2cb33892333754dac09b9c52f24bf39bf`.
+Pipe ownership and matching bytes do not establish operator/capture provenance.
+
+Ordinary-user validation requires compiler/binutils, Python with memfd/seal/FD
+exec support and ASan+UBSan. Missing tools or mandatory tests are failures, never
+skips. From the repository root run:
+
+```sh
+git rev-parse HEAD HEAD^{tree}
+node --test agents/scripts/offline-git-host-cgroup-observer-evidence.test.mjs
+node --test agents/docker/*.test.mjs agents/scripts/*.test.mjs
+git rev-parse HEAD HEAD^{tree}
+git status --short
+```
+
+The new suite compiles production reader bytes but NEVER runs them. It executes
+only the distinct nonroot simulated fixture, hardened and ASan+UBSan, and isolated
+Python with its root guard replaced by a nonroot guard and its exec replaced by
+a fixed sealed-data assertion. Tests cover literal read scope/no mutation,
+missing/partial/malformed/bound+1 states, custody/type/link/mount/name changes,
+per-boundary IO faults/first error/no later reads, short/EINTR/EPIPE refusal,
+parent/leaf enumeration, dirty kernel-unwritten padding and exported zeros,
+worst-case metadata/base64 output bounds, strict collector retention/hashes/false
+flags, and verifier pins/seals/held-input continuity. Source fixture results are
+synthetic and cannot qualify the host. Record exact HEAD/tree and five source
+hashes in the same validation shell; before committing, working source hashes
+identify the tested candidate, not the base SHA alone. Report full-suite baseline
+or environment failures separately; do not infer full-green or CI from a focused
+pass. Preserve complete logs and artifacts outside disposable tmpfs before exit.
+
+After a clean reviewed descendant containing exactly these five changed paths,
+nonroot preparation is:
+
+```sh
+node agents/scripts/offline-git-host-cgroup-observer-evidence.mjs prepare
+```
+
+This refuses dirty/wrong-base/wrong-scope checkouts. It retains source/tool/Python
+import/runtime/command inventories, builds and inspects the new reader without
+executing it, and runs separate hardened and sanitizer fixtures. A separate inert
+`owner-entry.txt` pins the new reader digest and runtime and names only
+`age30-observer-evidence-read-v1`. Its isolated Python verifier hashes bounded
+regular stdin and held system runtime files, verifies metadata continuity,
+creates/verifies/seals a memfd, closes unrelated FDs and uses fixed FD exec with
+an empty environment. The expected digest is literal, never read from an adjacent
+manifest. Entry text is not an executable script and grants no authority.
+Reconstruct and independently review pins at exact reviewed head and again at
+human merge. The build's UNKNOWN exit2 is expected; inventory `complete` is a
+source-preparation observation, not host admission. This preparer does not rebuild
+or relax the scopes of earlier setup/readers; keep their inventories separate.
+
+After independent source review, human merge and merge-bound preparation/pin
+review, obtain a new explicit owner authorization for (C) one installed-observer
+attempt and separately (D) this new reader to nonroot capture, including partial
+C evidence. Before C, D must already be reviewed/prepared/authorized. Refresh live
+installed-observer dev/inode/mount/custody against A/B and exact artifact pin;
+parent domain/empty/controller facts, absent run/leaf names and trusted runtime
+facts. Retain actual immediate preflight output, start/end/status and capture
+provenance. This appendix intentionally supplies no root invocation.
+
+C's only prospective writes remain three exclusive reserved16KiB evidence
+reports and one fresh empty leaf with the six ordered fixed control writes
+`cpu.max=20000 100000`, `cpu.max.burst=0`, `memory.max=536870912`,
+`memory.swap.max=0`, `memory.oom.group=1`, `pids.max=8` (LF terminated).
+No workload/profile, population, kill/freeze, mount/image, parent control,
+credential/service/network action or setup rerun. Stop on first uncertainty;
+retain prefix/leaf/reports including unsynced partials. No retry, cleanup,
+adoption/resume or stale-name reuse. Configured unused limits, observer cooperative
+timeout, trusted collection overhead and evidence reservations prove none of the
+seven preventive obligations. All remain UNKNOWN; AGE28 remains blocked.
