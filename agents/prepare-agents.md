@@ -52,8 +52,10 @@ ${HOME}/.config/darimuri-agent-orchestration/github-apps/
 별도 저장소의 Gateway 이미지를 Compose가 참조하는 태그로 빌드한다.
 
 ```bash
+git -C "${HOME}/my/clone/github.com/darimuri/github-app-agent-gateway" checkout --detach \
+  e50a4ad843618beb536c46f142117cd5b1a3280d
 docker build \
-  -t local/github-app-agent-gateway:196c5a3 \
+  -t local/github-app-agent-gateway:e50a4ad \
   "${HOME}/my/clone/github.com/darimuri/github-app-agent-gateway"
 ```
 

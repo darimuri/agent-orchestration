@@ -183,8 +183,8 @@ Clone and build the separate private repository with the tag referenced by `.env
 git clone https://github.com/darimuri/github-app-agent-gateway.git \
   /srv/github-app-agent-gateway
 git -C /srv/github-app-agent-gateway checkout --detach \
-  196c5a384875e9f5434536342e5277ca6e73ec68
-docker build -t local/github-app-agent-gateway:196c5a3 \
+  e50a4ad843618beb536c46f142117cd5b1a3280d
+docker build -t local/github-app-agent-gateway:e50a4ad \
   /srv/github-app-agent-gateway
 ```
 
