@@ -34,7 +34,7 @@ x-agent-common: &agent-common
 
 services:
   github-gateway:
-    image: ${GITHUB_GATEWAY_IMAGE:-local/github-app-agent-gateway:196c5a3}
+    image: ${GITHUB_GATEWAY_IMAGE:-local/github-app-agent-gateway:e50a4ad}
     init: true
     restart: unless-stopped
     read_only: true
