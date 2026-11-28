@@ -282,3 +282,80 @@ require filesystem investigation. No code chowns, deletes or treats it as user c
 All other foreign HOME-root entries remain denied. Actual new-ext4 startup must be
 validated with `test-host-operator-provisioning.sh` on an explicitly approved disposable
 root/Docker host; pure helper fixtures do not prove mounted filesystem acceptance.
+
+## Gateway publication records (AGE #31)
+
+This store is independent of all agent HOMEs, credentials and Gateway config/jobs.
+`GITHUB_GATEWAY_PUBLICATION_RECORDS_DIR` must be exactly
+`${AGENT_RUNTIME_ROOT}/publication-storage/records`; the default image ceiling is
+`GITHUB_GATEWAY_PUBLICATION_RECORDS_BYTES=67108864` (64MiB). Ext4 metadata reduces
+usable capacity. Do not treat this default as a workload-derived retention budget.
+The parent is root:root0700; records.img is root:root0600, regular, single-link,
+fully allocated. Only the mounted filesystem root is 1000:1000 mode0700. The empty
+underlying mountpoint remains root:root mode000. The helper binds exact image,
+loop device, zero offset/sizelimit, RO=0, ext4, exact mountpoint, rw/nosuid/nodev,
+capacity and full modes. `identity.json` seals the newly created image's host
+filesystem device/inode and size. An unsealed/orphan image is rejected, not adopted.
+Moving the image to another filesystem or restoring a backup requires a separate
+reviewed recovery procedure; copying files and rerunning prepare is not recovery.
+
+The dedicated helper has `validate`, `prepare`, `check` and `unmount` actions.
+`validate` is unprivileged and mutation-free. It checks accessible ancestors and defers EACCES inside deliberately private trees to the repeated privileged validation; it is not a substitute for exact host check. The runtime root must already exist. `check` is root-only and mutation-free:
+it does not create a lock or repair permissions. Prepare/unmount use exclusive
+`.provision.lock` creation. Failed mutation retains the lock, `.creating` files,
+image, identity and records for manual review. Never delete these to retry blindly.
+Only an exclusively created image is formatted; existing images are never resized,
+reformatted, repaired, recursively chowned or adopted. Existing mounted stores
+are verified without touching journal contents. Remount of the same sealed image
+is supported; allocation/ownership failures require manual review.
+
+Every Gateway Node process preloads the read-only startup guard via fixed
+`NODE_OPTIONS`. The guard validates UID/GID1000, mode0700, bounded ext4 statfs and
+an exact `/run/gateway-publications` mount from a loop device with filesystem root
+`/`, rw/nosuid/nodev. It performs no writes. This is stronger than directory
+validation alone: ordinary directories, tmpfs and the mode000 unmounted placeholder
+fail, including Docker automatic restart after reboot. `create_host_path:false`
+prevents Docker source creation. Startup guard validation does not replace the
+host helper's exact backing-image check. No privilege or loop device is exposed
+inside the Gateway. A preexisting bind can retain the mounted filesystem after a
+host unmount; it continues using that same journal, not an unbounded fallback.
+Stop Gateway before maintenance; never use lazy/forced unmount.
+
+All pending, commit, pull-pending, pull, staged and ambiguous artifacts are retained.
+There is no automatic prune, repair, backfill, adoption, replay or rollback. Monitor
+both `df -B1` and `df -i` on the mounted target. Block/inode exhaustion means stop
+publication and obtain manual review; never delete reservations to free space.
+Snapshot/receipt readback and health do not grant publication authority or prove
+an ambiguous operation failed. Preserve the entire image, identity and relevant
+job/approval evidence under trusted-host custody while Gateway is stopped. Backups
+must have the same restrictive custody; never mount an older journal and continue
+publication, since this can reopen consumed tuples. This slice implements no
+restore or journal migration workflow.
+
+Host acceptance, from the exact reviewed commit in a disposable environment:
+
+```bash
+git rev-parse HEAD HEAD^{tree}
+node --test agents/docker/*.test.mjs agents/scripts/*.test.mjs
+bash agents/scripts/test-resource-config.sh
+sudo bash agents/scripts/test-gateway-publication-storage.sh local/github-app-agent-gateway:e50a4ad
+bash agents/scripts/test-provision-runtime.sh
+```
+
+The new host script requires root, loop/ext4 tools and the locally present pinned
+Gateway image; it never builds/pulls images or uses credentials. Containers use
+`--network none`; it exercises the pinned offline PublicationRecords API, UID1000
+write/fsync, process restart, boot-without-mount rejection, record/image inode
+preservation and separate block/inode ENOSPC. Fixture-generated fill files may be
+removed only inside the disposable test. On any failure the fixture/container is
+preserved. Successful cleanup unmounts only the exact verified image mapping
+before removing the fixture. Run the legacy provision test only on a disposable
+host with its documented sudo prerequisites; it now prepares a publication fixture
+and refuses recursive cleanup if the mount cannot be safely detached.
+
+These scripts do not validate live snapshot authorization. After separately
+approved merge/provision/recreation, the owner must use a supported read-only
+`github_get_publication_snapshot` for an existing exact job/branch/head and verify
+its recorded result; an unknown tuple should be unavailable. Do not create a
+publication or adopt legacy records as a smoke test. Resume AGE #30 only through
+a separately authorized fresh continuation after the host evidence is reviewed.

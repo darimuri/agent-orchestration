@@ -2,12 +2,15 @@
 set -euo pipefail
 
 root_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+selected_publication=false
+if [[ "${1:-}" == --gateway-publications ]]; then selected_publication=true; shift; fi
 selected_host=false
 if [[ "${1:-}" == --agent ]]; then
   [[ "${2:-}" == host-operator && $# -ge 2 && $# -le 3 ]] || { echo 'invalid explicit agent selector' >&2; exit 1; }
   selected_host=true; shift 2
 elif [[ "${1:-}" == -* || $# -gt 1 ]]; then echo 'invalid provisioning arguments' >&2; exit 1
 fi
+if [[ "$selected_publication" == true && "$selected_host" == true ]]; then echo 'conflicting selectors' >&2; exit 1; fi
 readonly selected_host
 env_file="${1:-${root_dir}/.env}"
 
@@ -29,6 +32,29 @@ set -a
 # shellcheck disable=SC1090
 source "${env_file}"
 set +a
+
+# Validate publication layout before unrelated runtime/credential effects.
+if [[ "$selected_host" != true ]]; then
+  publication_env=(env)
+  for name in AGENT_RUNTIME_ROOT GITHUB_GATEWAY_PUBLICATION_RECORDS_DIR GITHUB_GATEWAY_PUBLICATION_RECORDS_BYTES GITHUB_GATEWAY_CREDENTIALS_ROOT GITHUB_GATEWAY_RUNTIME_DIR DISPATCHER_CREDENTIALS_DIR DEVELOPER_CREDENTIALS_DIR REVIEWER_CREDENTIALS_DIR DISPATCHER_WORKSPACE DEVELOPER_WORKSPACE REVIEWER_WORKSPACE; do
+    if [[ -v "$name" ]]; then publication_env+=("$name=${!name}"); fi
+  done
+  # Forward public path overrides as well, so privileged validation sees the same layout.
+  while IFS= read -r name; do
+    if [[ "$name" =~ (CREDENTIALS_(ROOT|DIR)|WORKSPACE|GITHUB_GATEWAY_RUNTIME_DIR|(JOURNAL|JOBS|IMAGE|HOME|STATE)_(DIR|DIRECTORY|FILE|PATH))$ ]]; then
+      publication_env+=("$name=${!name}")
+    fi
+  done < <(compgen -e)
+  node "$root_dir/scripts/gateway-publication-storage.mjs" validate
+  if [[ "$selected_publication" == true ]]; then
+    if (( EUID == 0 )); then
+      "${publication_env[@]}" node "$root_dir/scripts/gateway-publication-storage.mjs" check
+    else
+      sudo "${publication_env[@]}" "$(command -v node)" "$root_dir/scripts/gateway-publication-storage.mjs" check
+    fi
+    exit 0
+  fi
+fi
 
 if [[ "$selected_host" == true ]]; then
   (( EUID == 0 )) || { echo 'selected preflight requires trusted host root' >&2; exit 1; }
@@ -276,6 +302,7 @@ check_agent() {
 }
 
 check_gateway() {
+  node "$root_dir/scripts/gateway-publication-storage.mjs" check
   command -v jq >/dev/null 2>&1 || {
     printf 'jq is required to validate gateway role mappings.\n' >&2
     exit 1

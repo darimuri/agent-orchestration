@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import { pathToFileURL } from 'node:url';
 import { validateStateStorage } from '../docker/check-state-storage.mjs';
 export function verifyResourceConfig(config) {
+  verifyGateway(config);
   for (const role of ['dispatcher-planner', 'developer-a', 'reviewer-a', ...(config.services?.['host-operator'] ? ['host-operator'] : [])]) {
     const s = config.services?.[role];
     if (!s || !Number.isFinite(Number(s.cpus)) || Number(s.cpus) <= 0 ||
@@ -41,4 +42,30 @@ function verifyHostOperator(s) {
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   try { verifyResourceConfig(JSON.parse(fs.readFileSync(process.argv[2], 'utf8'))); console.log('Compose resource policy PASS'); }
   catch { console.error('Compose resource policy failed'); process.exitCode = 1; }
+}
+
+export function verifyGateway(config) {
+  const s=config.services?.['github-gateway'], target='/run/gateway-publications';
+  const fail=()=>{throw Error('Gateway publication mount policy failed');};
+  if(!s || s.read_only!==true || s.privileged || s.user || s.entrypoint || s.command || s.cap_add?.length || !s.cap_drop?.includes('ALL') || !s.security_opt?.includes('no-new-privileges:true'))fail();
+  const env=s.environment??{};
+  if(env.GATEWAY_PUBLICATION_RECORDS_DIRECTORY!==target || env.GATEWAY_PUBLICATION_STARTUP_GUARD!=='1' || env.NODE_OPTIONS!=='--import=/run/gateway-publication-guard.mjs')fail();
+  const bytes=String(env.GATEWAY_PUBLICATION_CAPACITY_BYTES);
+  validateStateStorage({type:0xef53n,bsize:4096n,blocks:/^[1-9][0-9]*$/.test(bytes)?BigInt(bytes)/4096n:0n},bytes);
+  const vols=s.volumes??[], writable=vols.filter(v=>v.read_only!==true), publication=writable[0];
+  if(vols.length!==4||writable.length!==1||publication?.target!==target||publication.type!=='bind'||!publication.bind||publication.bind.create_host_path===true||!publication.source?.endsWith('/publication-storage/records'))fail();
+  const root=publication.source.slice(0,-'/publication-storage/records'.length), store=root+'/publication-storage';
+  if(!root.startsWith('/')||root.includes('/../')||root.includes('//'))fail();
+  for(const role of ['dispatcher-planner','developer-a','reviewer-a',...(config.services['host-operator']?['host-operator']:[])]) {
+    if(config.services[role]?.volumes?.find(v=>v.target==='/home/agent')?.source!==root+'/state-storage/'+role)fail();
+  }
+  for(const [dest,suffix] of [['/run/secrets/github-apps',null],['/run/gateway',null],['/run/gateway-publication-guard.mjs','/scripts/gateway-publication-startup-guard.mjs']]) {
+    const found=vols.filter(v=>v.target===dest);
+    if(found.length!==1||found[0].read_only!==true||found[0].type!=='bind'||(suffix&&(!found[0].source?.endsWith(suffix)||!found[0].bind||found[0].bind.create_host_path===true)))fail();
+  }
+  for(const [role,service] of Object.entries(config.services)) for(const v of service.volumes??[]) {
+    if(role==='github-gateway' && v===publication)continue;
+    if(v.target===target||v.target?.startsWith(target+'/')||v.source&&(v.source===store||v.source.startsWith(store+'/')||store.startsWith(v.source+'/')))fail();
+  }
+  if((s.tmpfs??[]).some(v=>{const p=String(v).split(':')[0];return [target,'/run/gateway-publication-guard.mjs'].some(t=>p===t||p.startsWith(t+'/')||t.startsWith(p+'/'));}))fail();
 }

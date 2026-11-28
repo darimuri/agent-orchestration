@@ -840,3 +840,29 @@ Available fixtures: Node Git/guard/storage suites; unprivileged offline
 `test-host-operator-provisioning.sh <isolated-test-Codex-image>`, existing legacy
 `test-provision-runtime.sh`, workspace/resource host fixtures and build/smoke. Never run
 root fixtures against real state or treat missing Docker/compiler/root as a passing skip.
+
+### Dedicated Gateway publication storage
+
+Before default provisioning, explicitly prepare and check the dedicated store on
+an approved trusted host. Existing operational `.env` files must add
+`GITHUB_GATEWAY_PUBLICATION_RECORDS_DIR=${AGENT_RUNTIME_ROOT}/publication-storage/records`
+and `GITHUB_GATEWAY_PUBLICATION_RECORDS_BYTES=67108864`. No agent HOME setting changes.
+
+```bash
+# Stop Gateway first through the separately approved maintenance action.
+sudo bash scripts/provision-runtime.sh --gateway-publications /absolute/reviewed/runtime.env
+sudo bash scripts/preflight.sh --gateway-publications /absolute/reviewed/runtime.env
+```
+
+The runtime root must already exist (create it as the invoking host user before first preparation). The selected commands touch only publication storage, not identities/tokens/jobs.
+Default provisioning requires its exact mount check before unrelated effects;
+Host Operator selection remains independent. Compose needs the dedicated path
+and mounts it writable only in Gateway. A read-only Node preload checks bounded
+ext4 on every restart, so reboot with no host mount fails closed. Restore mounts
+and run exact preflight before a separately approved Gateway-only recreation:
+`docker compose up -d --no-deps --force-recreate github-gateway`. Health alone does
+not establish snapshot availability: require a supported read-only snapshot check.
+Do not resume publication or recreate agent services as part of this storage slice.
+See [RESOURCE_LIMITS.md](RESOURCE_LIMITS.md#gateway-publication-records-age-31)
+for retention, capacity, custody, failure preservation and disposable host acceptance.
+Never delete reservations, partial receipts or stale locks to make publication pass.
