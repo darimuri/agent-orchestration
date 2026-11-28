@@ -13,6 +13,7 @@ render() {
     KANEO_API_URL=https://kaneo.example.test AGENT_RUNTIME_ROOT=/tmp/buzz-resource-config/runtime \
     GITHUB_GATEWAY_CREDENTIALS_ROOT=/tmp/buzz-resource-config/gateway-credentials \
     GITHUB_GATEWAY_RUNTIME_DIR=/tmp/buzz-resource-config/gateway-runtime \
+    GITHUB_GATEWAY_PUBLICATION_RECORDS_DIR=/tmp/buzz-resource-config/runtime/publication-storage/records \
     DISPATCHER_CREDENTIALS_DIR=/tmp/buzz-resource-config/dispatcher-credentials \
     DEVELOPER_CREDENTIALS_DIR=/tmp/buzz-resource-config/developer-credentials \
     REVIEWER_CREDENTIALS_DIR=/tmp/buzz-resource-config/reviewer-credentials \

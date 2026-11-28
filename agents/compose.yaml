@@ -54,9 +54,24 @@ services:
       GATEWAY_APPS_FILE: /run/gateway/apps.json
       GATEWAY_AGENTS_FILE: /run/gateway/agents.json
       GATEWAY_JOBS_FILE: /run/gateway/jobs.json
+      GATEWAY_PUBLICATION_RECORDS_DIRECTORY: /run/gateway-publications
+      GATEWAY_PUBLICATION_CAPACITY_BYTES: ${GITHUB_GATEWAY_PUBLICATION_RECORDS_BYTES:-67108864}
+      GATEWAY_PUBLICATION_STARTUP_GUARD: "1"
+      NODE_OPTIONS: --import=/run/gateway-publication-guard.mjs
     volumes:
       - ${GITHUB_GATEWAY_CREDENTIALS_ROOT:?set GITHUB_GATEWAY_CREDENTIALS_ROOT}:/run/secrets/github-apps:ro
       - ${GITHUB_GATEWAY_RUNTIME_DIR:?set GITHUB_GATEWAY_RUNTIME_DIR}:/run/gateway:ro
+      - type: bind
+        source: ${GITHUB_GATEWAY_PUBLICATION_RECORDS_DIR:?set GITHUB_GATEWAY_PUBLICATION_RECORDS_DIR}
+        target: /run/gateway-publications
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ./scripts/gateway-publication-startup-guard.mjs
+        target: /run/gateway-publication-guard.mjs
+        read_only: true
+        bind:
+          create_host_path: false
     healthcheck:
       test:
         - CMD
