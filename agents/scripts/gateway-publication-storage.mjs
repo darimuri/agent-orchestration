@@ -81,9 +81,19 @@ function verified(p) {
   directory(fs.lstatSync(p.target),1000,1000,0o700);
   validateStateStorage(fs.statfsSync(p.target,{bigint:true}),String(p.bytes));
 }
-function inspect(p) {
+function heldLock(p,fd) {
+  const opened=fs.fstatSync(fd), named=fs.lstatSync(p.lock);
+  if(!opened.isFile() || opened.nlink!==1 || opened.uid!==0 || opened.gid!==0 || (opened.mode&0o7777)!==0o600 || named.isSymbolicLink() || named.dev!==opened.dev || named.ino!==opened.ino) deny();
+}
+function install(source,destination) {
+  // link is atomic and fails if destination exists; rename could overwrite retained state.
+  fs.linkSync(source,destination);
+  fs.unlinkSync(source);
+}
+function inspect(p,fd) {
   directory(fs.lstatSync(p.store),0,0,0o700);
-  if(exists(p.lock)||exists(p.image+'.creating')||exists(p.seal+'.creating')) deny();
+  if(fd===undefined) { if(exists(p.lock)) deny(); } else heldLock(p,fd);
+  if(exists(p.image+'.creating')||exists(p.seal+'.creating')) deny();
   const hasImage=exists(p.image), hasSeal=exists(p.seal), info=mount(p);
   if(hasImage!==hasSeal) deny(); // No implicit adoption of orphan/partially initialized images.
   if(hasImage){image(fs.lstatSync(p.image),p.bytes);seal(p);}
@@ -106,11 +116,13 @@ export function storage(action,env=process.env) {
     if(action!=='prepare') deny();
     fs.mkdirSync(p.store,{mode:0o700}); sync(p.root);
   }
-  const before=inspect(p);
-  if(action==='check') { verified(p); return p; } // Fully non-repairing; no lock creation.
+  if(action==='check') { inspect(p); verified(p); return p; } // Fully non-repairing; no lock creation.
+  directory(fs.lstatSync(p.store),0,0,0o700);
   const fd=fs.openSync(p.lock,'wx',0o600);
   let complete=false;
   try {
+    // Every decision about existing state must be made after exclusive acquisition.
+    const before=inspect(p,fd);
     if(action==='unmount') {
       if(before.info) { verified(p); run('umount',['--',p.target]); }
       placeholder(p);
@@ -123,14 +135,14 @@ export function storage(action,env=process.env) {
         run('fallocate',['--length',String(p.bytes),tmp]);
         run('mkfs.ext4',['-q','-F','-m','0','-E','nodiscard,lazy_itable_init=0,lazy_journal_init=0',tmp]);
         sync(tmp); image(fs.lstatSync(tmp),p.bytes);
-        fs.renameSync(tmp,p.image); sync(p.store);
+        install(tmp,p.image); sync(p.store);
         run('mount',['-t','ext4','-o','loop,rw,nosuid,nodev',p.image,p.target]);
         // Ownership changes only for this exclusively-created filesystem, after exact mount validation.
         exactMount(p,mount(p),loops());
         fs.chownSync(p.target,1000,1000); fs.chmodSync(p.target,0o700); sync(p.target);
         const sealFd=fs.openSync(p.seal+'.creating','wx',0o600);
         try{fs.writeFileSync(sealFd,JSON.stringify(identity(p)));fs.fsyncSync(sealFd);}finally{fs.closeSync(sealFd);}
-        fs.renameSync(p.seal+'.creating',p.seal); sync(p.store);
+        install(p.seal+'.creating',p.seal); sync(p.store);
       } else if(!before.info) {
         placeholder(p); run('mount',['-t','ext4','-o','loop,rw,nosuid,nodev',p.image,p.target]);
       }
@@ -138,9 +150,10 @@ export function storage(action,env=process.env) {
     }
     complete=true;
   } finally {
-    fs.closeSync(fd);
-    // A failed mutation leaves its lock/artifacts for explicit review; never repair or replay.
-    if(complete){fs.unlinkSync(p.lock);sync(p.store);}
+    try {
+      // A failed mutation leaves its lock/artifacts for explicit review; never repair or replay.
+      if(complete){heldLock(p,fd);fs.unlinkSync(p.lock);sync(p.store);}
+    } finally { fs.closeSync(fd); }
   }
   return p;
 }
