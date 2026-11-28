@@ -53,9 +53,9 @@ ${HOME}/.config/darimuri-agent-orchestration/github-apps/
 
 ```bash
 git -C "${HOME}/my/clone/github.com/darimuri/github-app-agent-gateway" checkout --detach \
-  e50a4ad843618beb536c46f142117cd5b1a3280d
+  c2ad3d9e8142b14472085a97e76ac1ddc3c19965
 docker build \
-  -t local/github-app-agent-gateway:e50a4ad \
+  -t local/github-app-agent-gateway:c2ad3d9 \
   "${HOME}/my/clone/github.com/darimuri/github-app-agent-gateway"
 ```
 
