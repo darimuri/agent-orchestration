@@ -8,6 +8,13 @@ host_gid="$(id -g)"
 scratch_dir="$(mktemp -d)"
 
 cleanup() {
+  local result=$?
+  if [[ -e "${scratch_dir}/agent-runtime/publication-storage" ]]; then
+    if (( result != 0 )) || ! as_root bash -c 'set -a; source "$1"; node "$2" unmount' fixture "${env_file}" "${root_dir}/scripts/gateway-publication-storage.mjs"; then
+      printf 'Preserving publication fixture: %s\n' "$scratch_dir" >&2
+      return 1
+    fi
+  fi
   if (( EUID == 0 )); then
     chown -R "${host_uid}:${host_gid}" "${scratch_dir}" >/dev/null 2>&1 || true
   else
@@ -60,6 +67,8 @@ GITHUB_REVIEWER_APP_SLUG=reviewer-app
 GITHUB_GATEWAY_CREDENTIALS_BASE_DIR=${scratch_dir}/gateway-credential-base
 GITHUB_GATEWAY_CREDENTIALS_ROOT=${scratch_dir}/gateway-credential-base/github-apps
 GITHUB_GATEWAY_RUNTIME_DIR=${scratch_dir}/agent-runtime/github-gateway
+GITHUB_GATEWAY_PUBLICATION_RECORDS_DIR=${scratch_dir}/agent-runtime/publication-storage/records
+GITHUB_GATEWAY_PUBLICATION_RECORDS_BYTES=67108864
 DISPATCHER_CREDENTIALS_DIR=${scratch_dir}/agent-runtime/dispatcher/credentials
 DISPATCHER_WORKSPACE=${scratch_dir}/agent-runtime/dispatcher/workspace
 DEVELOPER_CREDENTIALS_DIR=${scratch_dir}/agent-runtime/developer/credentials
@@ -123,6 +132,10 @@ printf 'REVIEWER_WORKSPACE=%s\n' \
   "${scratch_dir}/agent-runtime/reviewer-link" >>"${symlink_env}"
 expect_runtime_failure 'symlinked managed path' "${symlink_env}"
 
+# Missing store must block before credentials/runtime are created.
+expect_runtime_failure 'missing publication mount' "${env_file}"
+test ! -e "${scratch_dir}/agent-runtime/github-gateway"
+as_root bash "${root_dir}/scripts/provision-runtime.sh" --gateway-publications "${env_file}" >/dev/null
 PROVISION_RUNTIME_TEST_MODE=1 \
   "${root_dir}/scripts/provision-runtime.sh" "${env_file}" >/dev/null
 PROVISION_RUNTIME_TEST_MODE=1 \

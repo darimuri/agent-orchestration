@@ -361,3 +361,21 @@ session and fourth Codex login credentials. Existing provisioners still default 
 three; selected runtime exits before any Gateway requirement or write. No new Gateway
 role or Executor mount is introduced. Metadata preflight is distinct from live account,
 model/ACP and authorization acceptance. Leave normal ext4 lost+found untouched.
+
+## AGE #31: publication store preparation boundary
+
+The new Gateway store is a prerequisite to default runtime provisioning. Add the
+publication path/capacity from `.env.example` to the reviewed host environment.
+Use `sudo bash scripts/provision-runtime.sh --gateway-publications <env-file>` and
+`sudo bash scripts/preflight.sh --gateway-publications <env-file>` only during
+separately approved Gateway maintenance. These selected commands do not provision
+agents, credentials or jobs. Stop Gateway before mount maintenance; no lazy unmount.
+After merge and owner approval, recreate only `github-gateway` with `--no-deps`,
+check health and supported read-only publication snapshot behavior, then obtain a
+fresh authorization before AGE #30 publication. Missing mounts after reboot reject
+Gateway Node startup rather than using an ordinary host directory.
+
+Run the disposable root/Docker fixture in `scripts/test-gateway-publication-storage.sh`
+on the exact reviewed commit first. See `RESOURCE_LIMITS.md` for exact commands,
+retained artifacts and backup/restore custody. Do not prune/repair/resize/adopt or
+roll back journals. Full blocks or inodes require stopping publication for review.

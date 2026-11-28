@@ -1,13 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { verifyResourceConfig } from './verify-resource-config.mjs';
-const fixture = () => ({ services: Object.fromEntries(['dispatcher-planner', 'developer-a', 'reviewer-a'].map(role => [role, {
+const fixture = () => ({ services: { 'github-gateway': gatewayFixture(), ...Object.fromEntries(['dispatcher-planner', 'developer-a', 'reviewer-a'].map(role => [role, {
   cpus: 1, mem_limit: 2147483648, memswap_limit: 2147483648, read_only: true,
   cap_drop: ['ALL'], security_opt: ['no-new-privileges:true'],
   environment: { AGENT_STATE_CAPACITY_BYTES: '536870912' },
   volumes: [{ type: 'bind', source: `/tmp/runtime/state-storage/${role}`, target: '/home/agent', bind: { create_host_path: false } },
     { target: '/run/agent/credentials', read_only: true }],
-}])) });
+}])) } });
 test('normalized Compose resource policy and dangerous overrides', () => {
   assert.ok(verifyResourceConfig(fixture()));
   for (const mutate of [s => delete s.cpus, s => { s.cpus = 0; }, s => { s.mem_limit = 0; },
@@ -51,4 +51,18 @@ test('normalized binds retain exact read-only, path and authority checks', () =>
     mutate(config.services['host-operator']);
     assert.throws(() => verifyResourceConfig(config));
   }
+});
+
+function gatewayFixture() {
+ return {read_only:true,cap_drop:['ALL'],security_opt:['no-new-privileges:true'],environment:{GATEWAY_PUBLICATION_RECORDS_DIRECTORY:'/run/gateway-publications',GATEWAY_PUBLICATION_CAPACITY_BYTES:'67108864',GATEWAY_PUBLICATION_STARTUP_GUARD:'1',NODE_OPTIONS:'--import=/run/gateway-publication-guard.mjs'},volumes:[
+ {type:'bind',source:'/tmp/runtime/publication-storage/records',target:'/run/gateway-publications',bind:{create_host_path:false}},
+ {type:'bind',source:'/tmp/config',target:'/run/gateway',read_only:true},
+ {type:'bind',source:'/tmp/secrets',target:'/run/secrets/github-apps',read_only:true},
+ {type:'bind',source:'/tmp/source/scripts/gateway-publication-startup-guard.mjs',target:'/run/gateway-publication-guard.mjs',read_only:true,bind:{create_host_path:false}}]};
+}
+test('Gateway mount, guard and isolation negatives',()=>{
+ for(const mutate of [s=>s.volumes[0].bind.create_host_path=true,s=>s.volumes[0].read_only=true,s=>s.volumes[1].read_only=false,s=>s.volumes[0].source='/tmp/ordinary',s=>s.volumes[0].source='/tmp/foreign/publication-storage/records',s=>s.tmpfs=['/run:rw'],s=>s.volumes.push({...s.volumes[0],target:'/alias'}),s=>s.environment.NODE_OPTIONS='',s=>s.environment.GATEWAY_PUBLICATION_STARTUP_GUARD='0',s=>s.environment.GATEWAY_PUBLICATION_RECORDS_DIRECTORY='/wrong',s=>s.environment.GATEWAY_PUBLICATION_CAPACITY_BYTES='0',s=>s.read_only=false,s=>s.user='0',s=>s.cap_add=['SYS_ADMIN'],s=>s.volumes[3].read_only=false]) {
+  const c=fixture();mutate(c.services['github-gateway']);assert.throws(()=>verifyResourceConfig(c));
+ }
+ const c=fixture();c.services['developer-a'].volumes.push({...c.services['github-gateway'].volumes[0]});assert.throws(()=>verifyResourceConfig(c));
 });
